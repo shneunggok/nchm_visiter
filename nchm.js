@@ -51,7 +51,8 @@ const arSlotLocksRef = db.ref("arSlotLocks");
 // (주의: 클라이언트 코드 특성상 이메일 자체의 완전한 은닉은 불가능합니다.
 //  진짜 비공개가 필요하다면 별도 백엔드의 관리자 로그인 프록시가 필요하며,
 //  이는 별도 서버 컴포넌트가 없는 현재 구조의 구조적 한계임을 명시합니다.)
-const ADMIN_EMAIL = "choewonhyeog387@gmail.com";
+const ADMIN_EMAIL = "shneunggok@gmail.com";
+
 
 /* ==================== 전역 상수 및 변수 ==================== */
 

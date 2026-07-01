@@ -4,20 +4,26 @@
  * Firebase Realtime Database와 연동하여 데이터를 저장합니다.
  *
  * 수정 규칙:
- * 
  * 2. 데이터 저장 구조(AGE_GROUPS, PURPOSES)는 표준을 따르세요
  * 3. HTML 요소 ID명 변경 금지 (nchm.html과 연동)
  * 4. 스타일 수정은 nchm.css에서만 처리
  * ==========================================================
  *
- * [보안 패치 요약 - 본 버전에서 추가/수정된 사항]
- * 1. Firebase Rules 강화에 맞춰 익명 인증(Anonymous Auth) 추가 (Authentication / Authorization)
+ * [보안 패치]
+ * 1. Firebase Rules 강화에 맞춰 익명 인증(Anonymous Auth) 추가
  * 2. 모든 동적 innerHTML 출력에 escapeHtml() 적용 (XSS)
- * 3. 방문자/이용자 이름 등 입력값 검증 강화 (Input Validation)
- * 4. AR 예약 시간대 동시 예약 방지를 위한 Firebase Transaction 락 추가 (Race Condition)
- * 5. 제출 버튼 잠금 + 쿨다운 + 관리자 로그인 실패 잠금 (Rate Limiting / Brute-force 방지)
- * 6. console.error / alert 에 내부 에러 상세가 그대로 노출되지 않도록 정리 (Logging / Error Handling)
- * 7. visitLogs는 관리자 인증 시에만 구독하도록 변경 (Broken Access Control 대응, Rules와 연동)
+ * 3. 입력값 검증 강화 (Input Validation)
+ * 4. AR 예약 시간대 동시 예약 방지 Transaction 락 (Race Condition)
+ * 5. 제출 버튼 잠금 + 관리자 로그인 실패 잠금 (Rate Limiting)
+ * 6. 에러 상세 비노출 (Logging / Error Handling)
+ * 7. visitLogs 관리자 인증 시에만 구독 (Broken Access Control)
+ *
+ * [편의성 개선 - 이번 수정]
+ * 8. alert() 전면 제거 → 자동으로 사라지는 토스트 알림으로 교체
+ *    - 성공: 초록색 토스트 (showMessage(msg, "success"))
+ *    - 오류: 빨간색 토스트 (showMessage(msg, "error") — 기본값)
+ *    - 중립: 슬레이트 토스트 (showMessage(msg, "info"))
+ * 9. confirm() 전면 제거 → 삭제 버튼 클릭 즉시 삭제 처리
  * ==========================================================
  */
 
@@ -34,25 +40,16 @@ const firebaseConfig = {
     measurementId: "G-W0YLVVCQ9R"
 };
 
-// Firebase 앱 초기화
 firebase.initializeApp(firebaseConfig);
 
-// Firebase Authentication
 const auth = firebase.auth();
 
-// Realtime Database 참조
 const db = firebase.database();
 const visitLogsRef = db.ref("visitLogs");
 const arLogsRef = db.ref("arLogs");
-// [추가] AR 시간대 동시예약(Race Condition) 방지를 위한 락(lock) 전용 노드
 const arSlotLocksRef = db.ref("arSlotLocks");
 
-// [추가] 관리자 식별자 — Firebase Rules의 auth.token.email 비교와 반드시 동일해야 함
-// (주의: 클라이언트 코드 특성상 이메일 자체의 완전한 은닉은 불가능합니다.
-//  진짜 비공개가 필요하다면 별도 백엔드의 관리자 로그인 프록시가 필요하며,
-//  이는 별도 서버 컴포넌트가 없는 현재 구조의 구조적 한계임을 명시합니다.)
 const ADMIN_EMAIL = "shneunggok@gmail.com";
-
 
 /* ==================== 전역 상수 및 변수 ==================== */
 
@@ -68,48 +65,32 @@ const AGE_GROUPS = [
 
 const PURPOSES = ["휴식", "독서", "보드게임", "탁구", "스터디룸"];
 
-// 메모리에 올려둔 데이터 (Firebase에서 실시간으로 받아옴)
 let visitLogs = [];
 let arLogs = [];
 
-// 현재 필터 상태
 let currentFilter = "all";
 
-// [추가] 중복 제출(Race Condition) 방지 플래그
 let isSubmittingVisit = false;
 let isSubmittingAr = false;
 
-// [추가] 관리자 로그인 실패 횟수 / 잠금 시각 (Rate Limiting - Brute Force 방지)
 let adminLoginFailCount = 0;
 let adminLoginLockedUntil = 0;
 const ADMIN_LOGIN_MAX_ATTEMPTS = 5;
-const ADMIN_LOGIN_LOCK_MS = 60 * 1000; // 1분
+const ADMIN_LOGIN_LOCK_MS = 60 * 1000;
 
 /* ==================== 보안 유틸리티 ==================== */
 
-/**
- * [추가] XSS 방지를 위한 HTML 이스케이프 함수.
- * 사용자/방문자가 입력한 모든 문자열을 innerHTML에 삽입하기 전 반드시 이 함수를 통과시킨다.
- */
 function escapeHtml(value) {
     const div = document.createElement("div");
     div.textContent = value === null || value === undefined ? "" : String(value);
     return div.innerHTML;
 }
 
-/**
- * [추가] 민감정보(스택트레이스 등)를 콘솔/사용자에 그대로 노출하지 않기 위한 로깅 래퍼.
- * 운영 환경에서는 error.code 정도만 남기고, 사용자에게는 일반화된 메시지만 보여준다.
- */
 function logError(context, error) {
     const code = error && error.code ? error.code : "unknown_error";
     console.error(`[nchm:${context}] ${code}`);
 }
 
-/**
- * [추가] CSV(엑셀) Formula Injection 방지.
- * 셀 값이 =, +, -, @ 로 시작하면 앞에 작은따옴표를 붙여 수식으로 해석되지 않도록 한다.
- */
 function sanitizeCsvField(value) {
     const str = value === null || value === undefined ? "" : String(value);
     if (/^[=+\-@]/.test(str)) {
@@ -118,36 +99,20 @@ function sanitizeCsvField(value) {
     return str;
 }
 
-/**
- * [추가] 이름 입력값 검증.
- * 공백 제외 1~10자, 한글/영문/숫자/공백만 허용.
- */
 function isValidName(name) {
     return typeof name === "string" && /^[가-힣a-zA-Z0-9\s]{1,10}$/.test(name.trim());
 }
 
-/**
- * [추가] 연령대 값이 표준 AGE_GROUPS 목록에 포함되는지 검증.
- */
 function isValidAge(age) {
     return AGE_GROUPS.includes(age);
 }
 
-/**
- * [추가] 성별 값 검증.
- */
 function isValidGender(gender) {
     return gender === "남" || gender === "여";
 }
 
 /* ==================== Firebase 데이터 불러오기 ==================== */
 
-/**
- * [수정] Firebase에서 AR 예약 데이터를 실시간으로 구독합니다.
- * (방문 등록 데이터(visitLogs)는 관리자 전용 정보이므로 더 이상 여기서 구독하지 않고,
- *  관리자 인증 성공 시에만 subscribeVisitLogs()를 통해 구독합니다. — Broken Access Control 대응,
- *  Firebase Rules에서 visitLogs.read를 관리자 전용으로 제한한 것과 연동된 변경입니다.)
- */
 function initFirebaseListeners() {
     arLogsRef.on("value", (snapshot) => {
         arLogs = [];
@@ -155,7 +120,6 @@ function initFirebaseListeners() {
             arLogs.push({ _key: child.key, ...child.val() });
         });
         updateAdminDashboard();
-        // 시간대 버튼이 현재 화면에 그려져 있다면 예약 현황을 최신화
         if (!document.getElementById("section-ar").classList.contains("hidden")) {
             generateTimeSlots();
         }
@@ -164,9 +128,6 @@ function initFirebaseListeners() {
     });
 }
 
-/**
- * [추가] 관리자 전용 방문 등록 데이터 구독. 관리자 로그인 성공 시에만 호출된다.
- */
 function subscribeVisitLogs() {
     visitLogsRef.off();
     visitLogsRef.on("value", (snapshot) => {
@@ -195,33 +156,23 @@ function formatLocalDate(date = new Date()) {
     return `${year}-${month}-${day}`;
 }
 
-/**
- * Firebase에 방문 등록 데이터 저장
- */
 function saveVisitLog(logData) {
     return visitLogsRef.push(logData);
 }
 
-/**
- * Firebase에 AR 예약 데이터 저장
- */
 function saveArLog(logData) {
     return arLogsRef.push(logData);
 }
 
-/**
- * [추가] AR 예약 시간대를 원자적으로 선점한 뒤 예약을 저장한다.
- * 두 사용자가 동시에 같은 시간대를 선택해 제출하는 Race Condition(이중 예약)을 방지한다.
- */
 function reserveSlotAndSaveArLog(dateStr, timeSlot, logData) {
     const slotKey = `${dateStr}_${timeSlot}`.replace(/[.#$\[\]/]/g, "-");
     const lockRef = arSlotLocksRef.child(slotKey);
 
     return lockRef.transaction((current) => {
         if (current === null) {
-            return true; // 아직 아무도 선점하지 않음 → 선점 성공
+            return true;
         }
-        return; // 이미 선점됨 → 중단(undefined 반환 시 transaction 중단)
+        return;
     }).then((result) => {
         if (!result.committed) {
             const err = new Error("SLOT_TAKEN");
@@ -232,13 +183,43 @@ function reserveSlotAndSaveArLog(dateStr, timeSlot, logData) {
     });
 }
 
-function showMessage(msg) {
+/**
+ * [편의성 수정] 토스트 알림 함수
+ * type: "success" (초록) | "error" (빨강, 기본값) | "info" (슬레이트)
+ *
+ * 기존에는 type 파라미터 없이 항상 빨간색으로만 표시됐으나,
+ * 이제 성공/오류/정보를 색으로 구분하여 alert() 없이도 결과를 직관적으로 전달한다.
+ * 메시지 길이에 따라 표시 시간을 자동 조절한다.
+ */
+let _toastTimer = null;
+
+function showMessage(msg, type = "error") {
     const box = document.getElementById("custom-alert");
+
+    // 진행 중인 타이머가 있으면 초기화 (연속 호출 시 겹치지 않도록)
+    if (_toastTimer) {
+        clearTimeout(_toastTimer);
+        _toastTimer = null;
+    }
+
     box.innerText = msg;
+
+    // 클래스 초기화 후 타입에 맞는 클래스 적용
+    box.className = "";
+    if (type === "success") box.classList.add("success");
+    if (type === "info")    box.classList.add("info");
+    // "error"는 기본 CSS(빨간색)이므로 클래스 추가 불필요
+
     box.style.display = "block";
-    setTimeout(() => {
+
+    // 긴 메시지는 더 오래 표시 (글자수 기준 최소 2.5초 ~ 최대 4초)
+    const duration = Math.min(4000, Math.max(2500, msg.length * 60));
+
+    _toastTimer = setTimeout(() => {
         box.style.display = "none";
-    }, 2000);
+        box.className = "";
+        _toastTimer = null;
+    }, duration);
 }
 
 /* ==================== 관리자 인증 함수 ==================== */
@@ -254,9 +235,6 @@ function closePasswordModal() {
     document.getElementById("password-modal").classList.add("hidden");
 }
 
-/**
- * [추가] 로그인 시도 제한(Brute Force / Rate Limiting) 상태에 따라 확인 버튼을 잠근다.
- */
 function updateAdminLoginButtonState() {
     const btn = document.getElementById("admin-verify-btn");
     if (!btn) return;
@@ -270,11 +248,6 @@ function updateAdminLoginButtonState() {
     }
 }
 
-/**
- * 관리자 비밀번호 검증
- * [수정] 1) 로그인 시도 횟수 제한(Brute Force 방지) 2) 에러 상세 비노출 3) 인가 재확인을 위해
- *        로그인 성공 후 ID 토큰의 email 클레임이 ADMIN_EMAIL과 일치하는지 재검증.
- */
 async function verifyAdminPassword() {
 
     if (Date.now() < adminLoginLockedUntil) {
@@ -282,8 +255,7 @@ async function verifyAdminPassword() {
         return;
     }
 
-    const password =
-        document.getElementById("admin-password-input").value;
+    const password = document.getElementById("admin-password-input").value;
 
     if (!password) {
         showMessage("비밀번호를 입력해 주세요.");
@@ -291,13 +263,11 @@ async function verifyAdminPassword() {
     }
 
     try {
-
         const credential = await auth.signInWithEmailAndPassword(
             ADMIN_EMAIL,
             password
         );
 
-        // [추가] Authorization 재검증: 로그인된 계정이 실제 관리자 계정인지 토큰 기준으로 한 번 더 확인
         const tokenResult = await credential.user.getIdTokenResult();
         if (tokenResult.claims.email !== ADMIN_EMAIL) {
             await auth.signOut();
@@ -309,8 +279,6 @@ async function verifyAdminPassword() {
         adminLoginLockedUntil = 0;
 
         closePasswordModal();
-
-        // 로그인 완료 후 관리자 전용 데이터(visitLogs) 구독 시작
         subscribeVisitLogs();
 
         setTimeout(() => {
@@ -318,7 +286,6 @@ async function verifyAdminPassword() {
         }, 500);
 
     } catch (e) {
-
         logError("verifyAdminPassword", e);
 
         adminLoginFailCount += 1;
@@ -328,7 +295,6 @@ async function verifyAdminPassword() {
         }
 
         showMessage("비밀번호가 틀렸습니다.");
-
         document.getElementById("admin-password-input").value = "";
         document.getElementById("admin-password-input").focus();
         updateAdminLoginButtonState();
@@ -348,10 +314,6 @@ function enterAdminMode() {
     updateAdminDashboard();
 }
 
-/**
- * [수정] 관리자 모드 종료 시 관리자 인증 세션을 정리하고(Authorization 최소권한 원칙),
- * visitLogs 구독을 해제한 뒤 다시 익명 인증으로 전환한다.
- */
 function exitAdmin() {
     document.getElementById("main-content-container").classList.replace("max-w-6xl", "max-w-xl");
     document.getElementById("admin-tabs").classList.add("hidden");
@@ -369,14 +331,15 @@ function exitAdmin() {
     switchTab("visit");
 }
 
+/**
+ * [편의성 수정] confirm() 제거 — 삭제 버튼 클릭 즉시 삭제 처리.
+ * 완료/실패 모두 토스트로 표시.
+ */
 function deleteVisitLog(key) {
-
-    if (!confirm("이 방문기록을 삭제하시겠습니까?")) return;
-
     visitLogsRef.child(key)
         .remove()
         .then(() => {
-            showMessage("삭제 완료");
+            showMessage("삭제되었습니다.", "info");
         })
         .catch((err) => {
             logError("deleteVisitLog", err);
@@ -384,14 +347,14 @@ function deleteVisitLog(key) {
         });
 }
 
+/**
+ * [편의성 수정] confirm() 제거 — 삭제 버튼 클릭 즉시 삭제 처리.
+ */
 function deleteArLog(key) {
-
-    if (!confirm("이 AR 예약을 삭제하시겠습니까?")) return;
-
     arLogsRef.child(key)
         .remove()
         .then(() => {
-            showMessage("삭제 완료");
+            showMessage("삭제되었습니다.", "info");
         })
         .catch((err) => {
             logError("deleteArLog", err);
@@ -417,7 +380,7 @@ function switchTab(type) {
         document.getElementById("section-ar").classList.remove("hidden");
         document.getElementById("tab-ar").classList.add("active-ar");
         generateTimeSlots();
-        showArNotice(); // ar 팝업창 띄우는 함수에요
+        showArNotice();
     }
 }
 
@@ -447,9 +410,10 @@ function selectBtn(el, group) {
 function togglePurpose(el) {
     el.classList.toggle("active");
 }
-/* ==================== 팝업함수 ( AR) ==================== */
-function showArNotice() {
 
+/* ==================== 팝업함수 ( AR) ==================== */
+
+function showArNotice() {
     document.getElementById("ar-notice-modal").classList.remove("hidden");
 
     const btn = document.getElementById("arNoticeBtn");
@@ -459,40 +423,28 @@ function showArNotice() {
     btn.disabled = true;
     btn.classList.add("cursor-not-allowed");
 
-    // 초기화
     cover.style.transition = "none";
     cover.style.width = "100%";
-
     cover.offsetWidth;
-
-    // 흰색이 사라짐
     cover.style.transition = "width 3s linear";
     cover.style.width = "0%";
 
     let sec = 3;
-
     text.textContent = `확인했습니다 (${sec})`;
 
     const timer = setInterval(() => {
-
         sec--;
-
         if (sec > 0) {
-
             text.textContent = `확인했습니다 (${sec})`;
-
         } else {
-
             clearInterval(timer);
-
             text.textContent = "확인했습니다 ✓";
             btn.disabled = false;
             btn.classList.remove("cursor-not-allowed");
-
         }
-
-    },1000);
+    }, 1000);
 }
+
 function closeArNotice() {
     document.getElementById("ar-notice-modal").classList.add("hidden");
 }
@@ -508,7 +460,6 @@ function changeArCount(delta) {
     const container = document.getElementById("ar-user-container");
 
     if (delta > 0) {
-       
         const div = document.createElement("div");
         div.className = "ar-user-card card-shadow animate-fadeIn";
         div.innerHTML = `
@@ -530,7 +481,6 @@ function changeArCount(delta) {
         refreshIcons();
         div.querySelector("input")?.focus();
     } else if (delta < 0) {
-        
         if (container.lastElementChild) {
             container.lastElementChild.remove();
         }
@@ -539,6 +489,7 @@ function changeArCount(delta) {
     arCount = newCount;
     document.getElementById("ar-count-display").innerText = arCount;
 }
+
 function selectGender(btn) {
     const parent = btn.parentElement;
     parent.querySelectorAll("button").forEach((button) => {
@@ -687,7 +638,6 @@ function renderStatsTable(data, categories, targetBodyId, targetFooterId, themeC
         let rowTotal = 0;
 
         const tr = document.createElement("tr");
-        // [수정] category 값은 PURPOSES/고정 문자열에서만 오지만, 일관성을 위해 escape 적용 (XSS 방어)
         tr.innerHTML = `<td class="category-row">${escapeHtml(category)}</td>`;
 
         AGE_GROUPS.forEach((age, idx) => {
@@ -785,12 +735,10 @@ function updateAdminDashboard() {
 
     renderStatsTable(arStats, ["AR 이용"], "ar-stats-body", "ar-stats-footer", "ar-sum-col");
 
-    // [수정] 아래 visit-log-body, ar-log-body 렌더링 전체에 escapeHtml() 적용 — Stored XSS 차단
     const visitBody = document.getElementById("visit-log-body");
     visitBody.innerHTML = "";
 
     filteredVisitLogs.slice().reverse().forEach((log) => {
-
         const tr = document.createElement("tr");
         tr.className = "border-b hover:bg-slate-50";
 
@@ -804,13 +752,11 @@ function updateAdminDashboard() {
             <td class="font-bold">${escapeHtml(log.name)}</td>
             <td>${escapeHtml(log.gender)}</td>
             <td>${escapeHtml((log.age || "").split("(")[0])}</td>
-
             <td>
                 <div class="flex gap-1 justify-center">
                     ${purposesHtml}
                 </div>
             </td>
-
             <td>
                 <button onclick="deleteVisitLog('${escapeHtml(log._key)}')"
                     class="bg-red-500 text-white px-2 py-1 rounded text-xs">
@@ -829,7 +775,6 @@ function updateAdminDashboard() {
     arBody.innerHTML = "";
 
     filteredArLogs.slice().reverse().forEach((log) => {
-
         const tr = document.createElement("tr");
         tr.className = "border-b hover:bg-indigo-50/30";
 
@@ -850,7 +795,6 @@ function updateAdminDashboard() {
             <td class="font-bold">${escapeHtml(log.users?.[0]?.name || "")}</td>
             <td>${log.users?.length || 0}명</td>
             <td class="text-xs text-left px-4 py-2">${details}</td>
-
             <td>
                 <button onclick="deleteArLog('${escapeHtml(log._key)}')"
                     class="bg-red-500 text-white px-2 py-1 rounded text-xs">
@@ -869,8 +813,8 @@ function updateAdminDashboard() {
 /* ==================== 폼 제출 (Firebase 저장) ==================== */
 
 /**
- * [수정] 입력값 검증 강화, 중복제출(Race Condition) 방지, AR은 시간대 락 사용,
- * 오류 메시지 일반화(Error Handling/Logging) 적용. 기존 호출 방식(onclick="submitForm('visit'|'ar')")은 동일.
+ * [편의성 수정] 성공/실패 모두 alert() 대신 showMessage() 토스트로 처리.
+ * 확인 버튼을 누르지 않아도 자동으로 사라진다.
  */
 function submitForm(type) {
     const now = new Date();
@@ -879,7 +823,7 @@ function submitForm(type) {
 
     if (type === "visit") {
 
-        if (isSubmittingVisit) return; // [추가] 중복 클릭 방지
+        if (isSubmittingVisit) return;
 
         const purposes = Array.from(document.querySelectorAll(".v-purpose.active")).map((purpose) => purpose.querySelector("span").innerText);
 
@@ -902,7 +846,6 @@ function submitForm(type) {
             return;
         }
 
-        // [추가] 서버(Rules) 검증과 별개로 클라이언트 단에서도 형식 검증 (Input Validation - 빠른 피드백용, 보안의 핵심은 Rules)
         const invalidUser = users.find((user) => !isValidName(user.name) || !isValidGender(user.gender) || !isValidAge(user.age));
         if (invalidUser) {
             showMessage("이름은 한글/영문/숫자 10자 이내로 입력해 주세요!");
@@ -920,7 +863,8 @@ function submitForm(type) {
 
         Promise.all(savePromises)
             .then(() => {
-                alert(`${users.length}명 방문 등록이 완료되었습니다!`);
+                // [편의성 수정] alert() → 초록색 토스트. 확인 버튼 불필요.
+                showMessage(`${users.length}명 방문 등록이 완료되었습니다! ✓`, "success");
                 document.getElementById("visit-user-container").innerHTML = "";
                 document.querySelectorAll(".v-purpose").forEach((button) => button.classList.remove("active"));
                 visitCount = 0;
@@ -928,7 +872,7 @@ function submitForm(type) {
             })
             .catch((err) => {
                 logError("submitForm-visit", err);
-                alert("저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+                showMessage("저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
             })
             .finally(() => {
                 isSubmittingVisit = false;
@@ -937,7 +881,7 @@ function submitForm(type) {
 
     } else {
 
-        if (isSubmittingAr) return; // [추가] 중복 클릭 방지
+        if (isSubmittingAr) return;
 
         const timeSlot = document.querySelector(".time-slot-btn.active")?.querySelector("span")?.innerText;
 
@@ -972,10 +916,10 @@ function submitForm(type) {
         const arSubmitBtn = document.querySelector("#section-ar .submit-btn");
         if (arSubmitBtn) arSubmitBtn.disabled = true;
 
-        // [수정] 단순 push() 대신 시간대 락(transaction)을 선점한 뒤 저장 — 동시 예약 Race Condition 방지
         reserveSlotAndSaveArLog(dateStr, timeSlot, logData)
             .then(() => {
-                alert("AR 예약이 신청되었습니다!");
+                // [편의성 수정] alert() → 초록색 토스트
+                showMessage("AR 예약이 완료되었습니다! ✓", "success");
                 document.getElementById("ar-user-container").innerHTML = "";
                 document.querySelectorAll(".time-slot-btn").forEach((button) => {
                     button.classList.remove("active");
@@ -990,10 +934,10 @@ function submitForm(type) {
             .catch((err) => {
                 logError("submitForm-ar", err);
                 if (err && err.code === "SLOT_TAKEN") {
-                    alert("죄송합니다. 방금 다른 이용자가 같은 시간을 먼저 예약했습니다. 다른 시간을 선택해 주세요.");
+                    showMessage("방금 다른 이용자가 같은 시간을 먼저 예약했습니다. 다른 시간을 선택해 주세요.");
                     generateTimeSlots();
                 } else {
-                    alert("저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+                    showMessage("저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
                 }
             })
             .finally(() => {
@@ -1005,9 +949,6 @@ function submitForm(type) {
 
 /* ==================== 엑셀 다운로드 ==================== */
 
-/**
- * [수정] CSV Formula Injection 방지를 위해 sanitizeCsvField() 적용. 다운로드 결과/형식은 동일.
- */
 function exportToExcel(type) {
     let csvContent = "\uFEFF";
     let fileName = "";
@@ -1015,7 +956,8 @@ function exportToExcel(type) {
     if (type === "visit") {
         const filtered = visitLogs.filter((log) => isDateInRange(log.date));
         if (filtered.length === 0) {
-            alert("데이터가 없습니다.");
+            // [편의성 수정] alert() → 토스트
+            showMessage("다운로드할 데이터가 없습니다.", "info");
             return;
         }
         csvContent += "날짜,시간,이름,성별,나이,이용목적\n";
@@ -1026,7 +968,7 @@ function exportToExcel(type) {
     } else {
         const filtered = arLogs.filter((log) => isDateInRange(log.date));
         if (filtered.length === 0) {
-            alert("데이터가 없습니다.");
+            showMessage("다운로드할 데이터가 없습니다.", "info");
             return;
         }
         csvContent += "예약날짜,예약시간,대표자,총인원,이용자상세\n";
@@ -1064,7 +1006,9 @@ function initFilterOptions() {
 
     monthSelect.value = now.getMonth();
 }
+
 /* ==================== 방문 등록 인원수 ==================== */
+
 let visitCount = 0;
 
 function changeVisitCount(delta) {
@@ -1110,13 +1054,9 @@ function changeVisitCount(delta) {
         minusBtn.classList.remove("opacity-40", "cursor-not-allowed");
     }
 }
+
 /* ==================== 페이지 초기화 ==================== */
 
-/**
- * [수정] 익명 인증(Anonymous Auth)을 먼저 수행한 뒤 Firebase 리스너를 등록한다.
- * Firebase Rules가 "auth != null"을 요구하도록 강화되었기 때문에,
- * 일반 방문자도 인증 컨텍스트를 가져야 기존 기능(AR 예약 시간대 조회 등)이 정상 동작한다.
- */
 function initializePage() {
     const now = new Date();
     document.getElementById("current-date").innerText = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
@@ -1131,7 +1071,7 @@ function initializePage() {
     auth.signInAnonymously()
         .catch((e) => logError("anon-auth", e))
         .finally(() => {
-            initFirebaseListeners(); // ✅ Firebase 데이터(AR 예약) 구독 시작
+            initFirebaseListeners();
         });
 }
 

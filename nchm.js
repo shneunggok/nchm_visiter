@@ -18,12 +18,15 @@
  * 6. 에러 상세 비노출 (Logging / Error Handling)
  * 7. visitLogs 관리자 인증 시에만 구독 (Broken Access Control)
  *
- * [편의성 개선 - 이번 수정]
+ * [편의성 개선]
  * 8. alert() 전면 제거 → 자동으로 사라지는 토스트 알림으로 교체
- *    - 성공: 초록색 토스트 (showMessage(msg, "success"))
- *    - 오류: 빨간색 토스트 (showMessage(msg, "error") — 기본값)
- *    - 중립: 슬레이트 토스트 (showMessage(msg, "info"))
  * 9. confirm() 전면 제거 → 삭제 버튼 클릭 즉시 삭제 처리
+ *
+ * [기능 추가 - 이번 수정]
+ * 10. 메인 "이용 목적 및 연령별 통계" 테이블에 스터디룸·AR실 행 추가
+ *     - 스터디룸: visitLogs 기반 (단독 스터디룸 테이블과 동일한 데이터)
+ *     - AR실: arLogs 기반 (단독 AR 통계 테이블과 동일한 데이터)
+ *     - 단독 스터디룸 테이블, 단독 AR 통계 테이블은 코드 변경 없음
  * ==========================================================
  */
 
@@ -183,20 +186,11 @@ function reserveSlotAndSaveArLog(dateStr, timeSlot, logData) {
     });
 }
 
-/**
- * [편의성 수정] 토스트 알림 함수
- * type: "success" (초록) | "error" (빨강, 기본값) | "info" (슬레이트)
- *
- * 기존에는 type 파라미터 없이 항상 빨간색으로만 표시됐으나,
- * 이제 성공/오류/정보를 색으로 구분하여 alert() 없이도 결과를 직관적으로 전달한다.
- * 메시지 길이에 따라 표시 시간을 자동 조절한다.
- */
 let _toastTimer = null;
 
 function showMessage(msg, type = "error") {
     const box = document.getElementById("custom-alert");
 
-    // 진행 중인 타이머가 있으면 초기화 (연속 호출 시 겹치지 않도록)
     if (_toastTimer) {
         clearTimeout(_toastTimer);
         _toastTimer = null;
@@ -204,15 +198,12 @@ function showMessage(msg, type = "error") {
 
     box.innerText = msg;
 
-    // 클래스 초기화 후 타입에 맞는 클래스 적용
     box.className = "";
     if (type === "success") box.classList.add("success");
     if (type === "info")    box.classList.add("info");
-    // "error"는 기본 CSS(빨간색)이므로 클래스 추가 불필요
 
     box.style.display = "block";
 
-    // 긴 메시지는 더 오래 표시 (글자수 기준 최소 2.5초 ~ 최대 4초)
     const duration = Math.min(4000, Math.max(2500, msg.length * 60));
 
     _toastTimer = setTimeout(() => {
@@ -331,10 +322,6 @@ function exitAdmin() {
     switchTab("visit");
 }
 
-/**
- * [편의성 수정] confirm() 제거 — 삭제 버튼 클릭 즉시 삭제 처리.
- * 완료/실패 모두 토스트로 표시.
- */
 function deleteVisitLog(key) {
     visitLogsRef.child(key)
         .remove()
@@ -347,9 +334,6 @@ function deleteVisitLog(key) {
         });
 }
 
-/**
- * [편의성 수정] confirm() 제거 — 삭제 버튼 클릭 즉시 삭제 처리.
- */
 function deleteArLog(key) {
     arLogsRef.child(key)
         .remove()
@@ -687,26 +671,59 @@ function updateAdminDashboard() {
     const filteredVisitLogs = visitLogs.filter((log) => isDateInRange(log.date));
     const filteredArLogs = arLogs.filter((log) => isDateInRange(log.date));
 
-    const generalPurposes = PURPOSES.filter((purpose) => purpose !== "스터디룸");
+    /* ============================================================
+     * [수정] 메인 "이용 목적 및 연령별 통계" 테이블
+     *
+     * 기존: PURPOSES에서 스터디룸을 제외한 4개 카테고리만 집계
+     * 변경: PURPOSES 전체(스터디룸 포함 5개) + AR실 = 총 6개 카테고리
+     *
+     * - 휴식/독서/보드게임/탁구/스터디룸 → visitLogs에서 집계 (기존 로직 동일)
+     * - AR실 → arLogs에서 집계 (단독 AR 통계와 동일한 데이터 소스)
+     *
+     * 단독 스터디룸 테이블(study-stats-body)과
+     * 단독 AR 통계 테이블(ar-stats-body)은 아래에서 그대로 유지됨.
+     * ============================================================ */
 
+    // 메인 테이블 카테고리: PURPOSES 전체 + AR실
+    const mainCategories = [...PURPOSES, "AR실"];
+
+    // 메인 테이블 데이터 구조 초기화
     const vStats = {};
-    generalPurposes.forEach((purpose) => {
-        vStats[purpose] = {};
+    mainCategories.forEach((category) => {
+        vStats[category] = {};
         AGE_GROUPS.forEach((age) => {
-            vStats[purpose][age] = { 남: 0, 여: 0 };
+            vStats[category][age] = { 남: 0, 여: 0 };
         });
     });
 
+    // visitLogs → 휴식/독서/보드게임/탁구/스터디룸 집계
     filteredVisitLogs.forEach((log) => {
         (log.purposes || []).forEach((purpose) => {
-            if (generalPurposes.includes(purpose) && vStats[purpose] && vStats[purpose][log.age]) {
+            if (
+                PURPOSES.includes(purpose) &&
+                vStats[purpose] &&
+                vStats[purpose][log.age]
+            ) {
                 vStats[purpose][log.age][log.gender] += 1;
             }
         });
     });
 
-    renderStatsTable(vStats, generalPurposes, "visit-stats-body", "visit-stats-footer", "sum-col");
+    // arLogs → AR실 집계 (단독 AR 테이블과 동일한 데이터)
+    filteredArLogs.forEach((log) => {
+        (log.users || []).forEach((user) => {
+            if (vStats["AR실"][user.age]) {
+                vStats["AR실"][user.age][user.gender] += 1;
+            }
+        });
+    });
 
+    // 메인 테이블 렌더링
+    renderStatsTable(vStats, mainCategories, "visit-stats-body", "visit-stats-footer", "sum-col");
+
+    /* ============================================================
+     * 단독 스터디룸 테이블 — 변경 없음
+     * ============================================================ */
     const studyStats = { "스터디룸": {} };
     AGE_GROUPS.forEach((age) => {
         studyStats["스터디룸"][age] = { 남: 0, 여: 0 };
@@ -720,6 +737,9 @@ function updateAdminDashboard() {
 
     renderStatsTable(studyStats, ["스터디룸"], "study-stats-body", "study-stats-footer", "sum-col");
 
+    /* ============================================================
+     * 단독 AR 통계 테이블 — 변경 없음
+     * ============================================================ */
     const arStats = { "AR 이용": {} };
     AGE_GROUPS.forEach((age) => {
         arStats["AR 이용"][age] = { 남: 0, 여: 0 };
@@ -735,6 +755,9 @@ function updateAdminDashboard() {
 
     renderStatsTable(arStats, ["AR 이용"], "ar-stats-body", "ar-stats-footer", "ar-sum-col");
 
+    /* ============================================================
+     * 상세 방문 내역 테이블 — 변경 없음
+     * ============================================================ */
     const visitBody = document.getElementById("visit-log-body");
     visitBody.innerHTML = "";
 
@@ -771,6 +794,9 @@ function updateAdminDashboard() {
     document.getElementById("visit-count-badge").innerText =
         filteredVisitLogs.length + "건";
 
+    /* ============================================================
+     * 상세 AR 예약 현황 테이블 — 변경 없음
+     * ============================================================ */
     const arBody = document.getElementById("ar-log-body");
     arBody.innerHTML = "";
 
@@ -812,10 +838,6 @@ function updateAdminDashboard() {
 
 /* ==================== 폼 제출 (Firebase 저장) ==================== */
 
-/**
- * [편의성 수정] 성공/실패 모두 alert() 대신 showMessage() 토스트로 처리.
- * 확인 버튼을 누르지 않아도 자동으로 사라진다.
- */
 function submitForm(type) {
     const now = new Date();
     const timeStr = `${now.getHours()}:${now.getMinutes().toString().padStart(2, "0")}`;
@@ -863,7 +885,6 @@ function submitForm(type) {
 
         Promise.all(savePromises)
             .then(() => {
-                // [편의성 수정] alert() → 초록색 토스트. 확인 버튼 불필요.
                 showMessage(`${users.length}명 방문 등록이 완료되었습니다! ✓`, "success");
                 document.getElementById("visit-user-container").innerHTML = "";
                 document.querySelectorAll(".v-purpose").forEach((button) => button.classList.remove("active"));
@@ -918,7 +939,6 @@ function submitForm(type) {
 
         reserveSlotAndSaveArLog(dateStr, timeSlot, logData)
             .then(() => {
-                // [편의성 수정] alert() → 초록색 토스트
                 showMessage("AR 예약이 완료되었습니다! ✓", "success");
                 document.getElementById("ar-user-container").innerHTML = "";
                 document.querySelectorAll(".time-slot-btn").forEach((button) => {
@@ -956,7 +976,6 @@ function exportToExcel(type) {
     if (type === "visit") {
         const filtered = visitLogs.filter((log) => isDateInRange(log.date));
         if (filtered.length === 0) {
-            // [편의성 수정] alert() → 토스트
             showMessage("다운로드할 데이터가 없습니다.", "info");
             return;
         }

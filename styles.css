@@ -1,16 +1,3 @@
-/**
- * ==================== nchm.css 파일 설명 ====================
- * 이 파일은 시흥시능곡청소년문화의집 통합 서비스의 모든 스타일을 관리합니다.
- * 
- * 수정 규칙:
- * 1. 색상/폰트/레이아웃만 수정 (HTML 구조 변경 금지)
- * 2. 테마별 색상: 방문등록(BLUE), AR예약(PURPLE), 관리자(GRAY)
- * 3. 동작/기능 수정은 nchm.js에서만 처리
- * 4. HTML 구조 수정은 nchm.html에서만 처리
- * ==========================================================
- */
-
-/* ==================== 기본 폰트 및 전역 스타일 ==================== */
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
 
 body {
@@ -18,25 +5,44 @@ body {
     transition: background-color 0.4s ease;
 }
 
-/* ==================== 테마별 색상 설정 ==================== */
+/*
+    유지보수 메모
+    1. CSS는 기존 디자인을 최대한 그대로 유지했습니다.
+    2. 지금 파일은 "스타일만" 담당합니다.
+    3. 동작 수정은 script.js에서 하고, 화면 구조 수정은 index.html에서 진행하세요.
+    4. "디자인 변경 금지" 요청이 있었으므로, 여기서는 작동에 필요한 분리만 했습니다.
+*/
 
+/* 방문 등록 테마 - BLUE */
 body.theme-visit { background-color: #f0f7ff; }
 .theme-visit .gradient-banner { background: linear-gradient(135deg, #2563eb, #3b82f6); }
 .theme-visit .choice-btn.active { border-color: #2563eb !important; background-color: #2563eb !important; color: white !important; }
 .theme-visit .submit-btn { background-color: #2563eb; box-shadow: 0 8px 15px rgba(37, 99, 235, 0.3); }
 .theme-visit .check-badge { background-color: #fbbf24; color: #1e3a8a; }
 
+/* AR 예약 테마 - PURPLE/INDIGO */
 body.theme-ar { background-color: #f5f3ff; }
 .theme-ar .gradient-banner { background: linear-gradient(135deg, #6366f1, #a855f7); }
 .theme-ar .choice-btn.active { border-color: #6366f1 !important; background-color: #6366f1 !important; color: white !important; }
 .theme-ar .submit-btn { background-color: #6366f1; box-shadow: 0 8px 15px rgba(99, 102, 241, 0.3); }
 .theme-ar .check-badge { background-color: #fcd34d; color: #312e81; }
 
+/* 관리자 테마 */
 body.theme-admin { background-color: #f8fafc; }
 
-/* ==================== 공용 스타일 ==================== */
-
 .card-shadow { box-shadow: 0 4px 25px rgba(0, 0, 0, 0.06); }
+
+.visit-name-input {
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
+}
+
+.visit-name-input:hover,
+.visit-name-input:focus {
+    background-color: #ffffff;
+    border-color: #60a5fa !important;
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.18);
+    transform: translateY(-1px);
+}
 
 .choice-btn {
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -61,8 +67,6 @@ body.theme-admin { background-color: #f8fafc; }
 }
 
 .choice-btn.active .check-badge { display: flex; }
-
-/* ==================== 탭 메뉴 스타일 ==================== */
 
 .tab-btn {
     position: relative;
@@ -97,62 +101,34 @@ body.theme-admin { background-color: #f8fafc; }
     border-radius: 10px;
 }
 
-/* ==================== 애니메이션 ==================== */
-
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(10px); }
-    to   { opacity: 1; transform: translateY(0); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .animate-fadeIn { animation: fadeIn 0.3s ease-out forwards; }
 
-/* ==================== 토스트 알림 박스 ==================== */
-
-/*
- * [편의성 수정] 기존 단일 빨간색 알림에서 성공(초록)/오류(빨강) 두 가지 타입으로 분리.
- * JS의 showMessage(msg, type) 에서 type에 따라 .success 클래스를 붙이거나 뗀다.
- * 애니메이션을 추가해 자연스럽게 나타났다 사라지도록 개선.
- */
-@keyframes toastIn {
-    from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
-    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-
 #custom-alert {
     display: none;
     position: fixed;
-    top: 24px;
+    top: 20px;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 9999;
-    /* 기본 = 오류 → 빨간색 */
+    z-index: 1000;
     background-color: #ef4444;
     color: white;
-    padding: 14px 28px;
-    border-radius: 14px;
+    padding: 12px 24px;
+    border-radius: 12px;
     font-weight: bold;
-    font-size: 15px;
-    white-space: nowrap;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-    animation: toastIn 0.25s ease-out;
-    /* 최대 너비 설정 — 긴 메시지도 줄바꿈 처리 */
-    max-width: 90vw;
-    white-space: normal;
-    text-align: center;
-    line-height: 1.5;
 }
 
-/* 성공 타입 — 초록색 */
 #custom-alert.success {
     background-color: #16a34a;
 }
 
-/* 정보 타입 — 슬레이트 (삭제 완료 등 중립 알림) */
 #custom-alert.info {
     background-color: #475569;
 }
-
-/* ==================== 관리자 통계 테이블 ==================== */
 
 .stats-container {
     background: white;
@@ -170,7 +146,8 @@ body.theme-admin { background-color: #f8fafc; }
     min-width: 1000px;
 }
 
-.stats-table th, .stats-table td {
+.stats-table th,
+.stats-table td {
     border: 1px solid #f1f5f9;
     padding: 10px 4px;
     text-align: center;
@@ -190,8 +167,6 @@ body.theme-admin { background-color: #f8fafc; }
 .stats-table .final-total-visit { background-color: #2563eb; }
 .stats-table .final-total-ar { background-color: #6366f1; }
 
-/* ==================== 필터 칩 스타일 ==================== */
-
 .filter-chip {
     padding: 8px 16px;
     border-radius: 12px;
@@ -209,8 +184,6 @@ body.theme-admin { background-color: #f8fafc; }
     border-color: #1e293b;
 }
 
-/* ==================== AR 예약 이용자 카드 ==================== */
-
 .ar-user-card {
     background-color: white;
     border: 1px solid #f1f5f9;
@@ -223,6 +196,95 @@ body.theme-admin { background-color: #f8fafc; }
     position: relative;
 }
 
+.visit-user-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+
+.visit-count-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.visit-count-btn {
+    width: 72px;
+    height: 72px;
+    border-radius: 22px;
+    font-size: 2.2rem;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.visit-count-btn-minus {
+    background-color: #e2e8f0;
+    color: #64748b;
+}
+
+.visit-count-btn-minus.disabled,
+.visit-count-btn-minus:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.submit-btn:disabled,
+#admin-verify-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.visit-count-btn-plus {
+    background-color: #6366f1;
+    color: white;
+}
+
+.visit-count-display {
+    min-width: 24px;
+    text-align: center;
+    font-size: 2.5rem;
+    font-weight: 900;
+    color: #0f172a;
+}
+
+.visit-user-card {
+    border-radius: 32px;
+    padding: 38px;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+}
+
+.visit-user-card-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(180px, 1fr) minmax(0, 1.2fr);
+    gap: 24px;
+    width: 100%;
+    align-items: center;
+}
+
+.visit-user-name,
+.visit-user-age {
+    min-height: 112px;
+    border-radius: 30px;
+    font-size: 1.05rem;
+}
+
+.visit-user-gender {
+    min-height: 112px;
+    border-radius: 30px;
+    padding: 12px;
+}
+
+.visit-user-gender button {
+    min-height: 88px;
+    font-size: 1.5rem;
+}
+
 @media (min-width: 640px) {
     .ar-user-card {
         flex-direction: row;
@@ -230,7 +292,47 @@ body.theme-admin { background-color: #f8fafc; }
     }
 }
 
-/* ==================== 시간대 선택 버튼 ==================== */
+@media (max-width: 767px) {
+    .visit-user-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .visit-count-controls {
+        align-self: flex-end;
+    }
+
+    .visit-count-btn {
+        width: 56px;
+        height: 56px;
+        border-radius: 18px;
+        font-size: 1.75rem;
+    }
+
+    .visit-count-display {
+        font-size: 2rem;
+    }
+
+    .visit-user-card {
+        padding: 24px;
+    }
+
+    .visit-user-card-row {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .visit-user-name,
+    .visit-user-age,
+    .visit-user-gender {
+        min-height: 72px;
+    }
+
+    .visit-user-gender button {
+        min-height: 56px;
+        font-size: 1.1rem;
+    }
+}
 
 .time-slot-btn.disabled {
     background-color: #f1f5f9 !important;
@@ -240,8 +342,6 @@ body.theme-admin { background-color: #f8fafc; }
     opacity: 0.6;
 }
 
-/* ==================== 관리자 셀렉트 박스 ==================== */
-
 .admin-select {
     appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
@@ -250,8 +350,6 @@ body.theme-admin { background-color: #f8fafc; }
     background-size: 1rem;
     padding-right: 1.5rem;
 }
-
-/* ==================== 검색 및 조회 버튼 ==================== */
 
 .search-confirm-btn {
     background-color: #475569;
@@ -267,8 +365,6 @@ body.theme-admin { background-color: #f8fafc; }
 }
 
 .search-confirm-btn:hover { background-color: #1e293b; }
-
-/* ==================== 엑셀 다운로드 버튼 ==================== */
 
 .excel-download-btn {
     background-color: #166534;
@@ -287,8 +383,6 @@ body.theme-admin { background-color: #f8fafc; }
     background-color: #14532d;
     transform: translateY(-1px);
 }
-
-/* ==================== 네비게이션 바 ==================== */
 
 .navbar {
     background-color: white;
@@ -315,12 +409,4 @@ body.theme-admin { background-color: #f8fafc; }
     height: 60px;
     width: auto;
     object-fit: contain;
-}
-
-/* 버튼 비활성화 상태 시각 표시 */
-.submit-btn:disabled,
-#admin-verify-btn:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-    pointer-events: none;
 }

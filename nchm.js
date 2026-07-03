@@ -70,6 +70,8 @@ const PURPOSES = ["휴식", "독서", "보드게임", "탁구", "스터디룸"];
 
 let visitLogs = [];
 let arLogs = [];
+let arLogsToday = [];
+let arLogsTodayQuery = null;
 
 let currentFilter = "all";
 
@@ -116,32 +118,46 @@ function isValidGender(gender) {
 
 /* ==================== Firebase 데이터 불러오기 ==================== */
 
-function initFirebaseListeners() {
+function subscribeArLogsToday() {
+    if (arLogsTodayQuery) arLogsTodayQuery.off();
+
+    const todayStr = formatLocalDate(new Date());
+    arLogsTodayQuery = arLogsRef.orderByChild("date").equalTo(todayStr);
+
+    arLogsTodayQuery.on("value", (snapshot) => {
+        arLogsToday = [];
+        snapshot.forEach((child) => {
+            arLogsToday.push({ _key: child.key, ...child.val() });
+        });
+        if (!document.getElementById("section-ar").classList.contains("hidden")) {
+            generateTimeSlots();
+        }
+    }, (error) => {
+        logError("arLogsTodayQuery.on", error);
+    });
+}
+
+function subscribeArLogsAll() {
+    if (arLogsTodayQuery) {
+        arLogsTodayQuery.off();
+        arLogsTodayQuery = null;
+    }
+    arLogsRef.off();
     arLogsRef.on("value", (snapshot) => {
         arLogs = [];
         snapshot.forEach((child) => {
             arLogs.push({ _key: child.key, ...child.val() });
         });
         updateAdminDashboard();
-        if (!document.getElementById("section-ar").classList.contains("hidden")) {
-            generateTimeSlots();
-        }
     }, (error) => {
-        logError("arLogsRef.on", error);
+        logError("arLogsRef.on(all)", error);
     });
 }
 
-function subscribeVisitLogs() {
-    visitLogsRef.off();
-    visitLogsRef.on("value", (snapshot) => {
-        visitLogs = [];
-        snapshot.forEach((child) => {
-            visitLogs.push({ _key: child.key, ...child.val() });
-        });
-        updateAdminDashboard();
-    }, (error) => {
-        logError("visitLogsRef.on", error);
-    });
+function unsubscribeArLogsAll() {
+    arLogsRef.off();
+    arLogs = [];
+    subscribeArLogsToday();
 }
 
 /* ==================== 유틸리티 함수 ==================== */
@@ -271,6 +287,7 @@ async function verifyAdminPassword() {
 
         closePasswordModal();
         subscribeVisitLogs();
+        subscribeArLogsAll();
 
         setTimeout(() => {
             enterAdminMode();
@@ -314,7 +331,7 @@ function exitAdmin() {
 
     visitLogsRef.off();
     visitLogs = [];
-
+    unsubscribeArLogsAll();
     auth.signOut()
         .then(() => auth.signInAnonymously())
         .catch((e) => logError("exitAdmin-reauth", e));
@@ -490,7 +507,7 @@ function generateTimeSlots() {
     const day = now.getDay();
     const isWeekend = day === 0 || day === 6;
     const todayStr = formatLocalDate(now);
-    const reservedSlots = arLogs
+    const reservedSlots = arLogsToday
         .filter((log) => log.date === todayStr)
         .map((log) => log.timeSlot);
 
@@ -1086,7 +1103,7 @@ function initializePage() {
     auth.signInAnonymously()
         .catch((e) => logError("anon-auth", e))
         .finally(() => {
-            initFirebaseListeners();
+            subscribeArLogsToday();
         });
 }
 

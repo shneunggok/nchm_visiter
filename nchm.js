@@ -322,21 +322,18 @@ function exitAdmin() {
     switchTab("visit");
 }
 
-function deleteVisitLog(key) {
-    visitLogsRef.child(key)
-        .remove()
-        .then(() => {
-            showMessage("삭제되었습니다.", "info");
-        })
-        .catch((err) => {
-            logError("deleteVisitLog", err);
-            showMessage("삭제 중 오류가 발생했습니다.");
-        });
-}
-
 function deleteArLog(key) {
-    arLogsRef.child(key)
-        .remove()
+    const log = arLogs.find((l) => l._key === key);
+    const slotKey = log
+        ? `${log.date}_${log.timeSlot}`.replace(/[.#$\[\]/]/g, "-")
+        : null;
+
+    const removeLog = arLogsRef.child(key).remove();
+    const removeLock = slotKey
+        ? arSlotLocksRef.child(slotKey).remove()
+        : Promise.resolve();
+
+    Promise.all([removeLog, removeLock])
         .then(() => {
             showMessage("삭제되었습니다.", "info");
         })
@@ -345,7 +342,6 @@ function deleteArLog(key) {
             showMessage("삭제 중 오류가 발생했습니다.");
         });
 }
-
 /* ==================== 탭 전환 함수 ==================== */
 
 function switchTab(type) {

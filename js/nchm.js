@@ -1,80 +1,10 @@
 /**
- * ==================== nchm.js 파일 설명 ====================
- * 이 파일은 시흥시능곡청소년문화의집 통합 서비스의 모든 동작을 관리합니다.
- * Firebase Realtime Database와 연동하여 데이터를 저장합니다.
- *
- * 수정 규칙:
- * 2. 데이터 저장 구조(AGE_GROUPS, PURPOSES)는 표준을 따르세요
- * 3. HTML 요소 ID명 변경 금지 (nchm.html과 연동)
- * 4. 스타일 수정은 nchm.css에서만 처리
- * ==========================================================
- *
- * [보안 패치]
- * 1. Firebase Rules 강화에 맞춰 익명 인증(Anonymous Auth) 추가
- * 2. 모든 동적 innerHTML 출력에 escapeHtml() 적용 (XSS)
- * 3. 입력값 검증 강화 (Input Validation)
- * 4. AR 예약 시간대 동시 예약 방지 Transaction 락 (Race Condition)
- * 5. 제출 버튼 잠금 + 관리자 로그인 실패 잠금 (Rate Limiting)
- * 6. 에러 상세 비노출 (Logging / Error Handling)
- * 7. visitLogs 관리자 인증 시에만 구독 (Broken Access Control)
- *
- * [편의성 개선]
- * 8. alert() 전면 제거 → 자동으로 사라지는 토스트 알림으로 교체
- * 9. confirm() 전면 제거 → 삭제 버튼 클릭 즉시 삭제 처리
- *
- * [기능 추가 - 이번 수정]
- * 10. 메인 "이용 목적 및 연령별 통계" 테이블에 스터디룸·AR실 행 추가
- *     - 스터디룸: visitLogs 기반 (단독 스터디룸 테이블과 동일한 데이터)
- *     - AR실: arLogs 기반 (단독 AR 통계 테이블과 동일한 데이터)
- *     - 단독 스터디룸 테이블, 단독 AR 통계 테이블은 코드 변경 없음
- * ==========================================================
+ * nchm.js
+ * 메인 페이지 로직과 UI 조작, 통합 초기화.
+ * 기존 기능은 그대로 유지하며 내부 모듈로 책임을 분리했습니다.
  */
 
-/* ==================== Firebase 초기화 ==================== */
-
-const firebaseConfig = {
-    apiKey: "AIzaSyDm2x9BtBynGBJYZ56eNjoAMH3fxIGdyyw",
-    authDomain: "nchm-131bb.firebaseapp.com",
-    databaseURL: "https://nchm-131bb-default-rtdb.firebaseio.com",
-    projectId: "nchm-131bb",
-    storageBucket: "nchm-131bb.firebasestorage.app",
-    messagingSenderId: "592225829882",
-    appId: "1:592225829882:web:92942c947bbc498926da43",
-    measurementId: "G-W0YLVVCQ9R"
-};
-
-firebase.initializeApp(firebaseConfig);
-
-const auth = firebase.auth();
-
-const db = firebase.database();
-const visitLogsRef = db.ref("visitLogs");
-const arLogsRef = db.ref("arLogs");
-const arSlotLocksRef = db.ref("arSlotLocks");
-
-const ADMIN_EMAIL = "shneunggok@gmail.com";
-
-/* ==================== 전역 상수 및 변수 ==================== */
-
-const AGE_GROUPS = [
-    "초등(9~13세)",
-    "중등(14~16세)",
-    "고등(17~19세)",
-    "청년(20~24세)",
-    "청년(25~39세)",
-    "유아(8세 미만)",
-    "성인(40세 이상)"
-];
-
-const PURPOSES = ["휴식", "독서", "보드게임", "탁구", "스터디룸"];
-
-let visitLogs = [];
-let arLogs = [];
-let arLogsToday = [];
-let arLogsTodayQuery = null;
-
 let currentFilter = "all";
-
 let isSubmittingVisit = false;
 let isSubmittingAr = false;
 
@@ -134,19 +64,6 @@ function subscribeArLogsToday() {
         }
     }, (error) => {
         logError("arLogsTodayQuery.on", error);
-    });
-}
-
-function subscribeVisitLogs() {
-    visitLogsRef.off();
-    visitLogsRef.on("value", (snapshot) => {
-        visitLogs = [];
-        snapshot.forEach((child) => {
-            visitLogs.push({ _key: child.key, ...child.val() });
-        });
-        updateAdminDashboard();
-    }, (error) => {
-        logError("visitLogsRef.on(all)", error);
     });
 }
 
@@ -365,9 +282,7 @@ function deleteVisitLog(key) {
 
 function deleteArLog(key) {
     const log = arLogs.find((l) => l._key === key);
-    const slotKey = log
-        ? `${log.date}_${log.timeSlot}`.replace(/[.#$\[\]/]/g, "-")
-        : null;
+    const slotKey = log ? createSlotKey(log.date, log.timeSlot) : null;
 
     const removeLog = arLogsRef.child(key).remove();
     const removeLock = slotKey
@@ -383,22 +298,21 @@ function deleteArLog(key) {
             showMessage("삭제 중 오류가 발생했습니다.");
         });
 }
-/* ==================== 탭 전환 함수 ==================== */
 
 function switchTab(type) {
     document.getElementById("tab-visit").className = "tab-btn font-bold";
     document.getElementById("tab-ar").className = "tab-btn font-bold";
-    document.getElementById("main-tabs").classList.remove("hidden");
-    document.getElementById("section-visit").classList.add("hidden");
-    document.getElementById("section-ar").classList.add("hidden");
+    dom.mainTabs.classList.remove("hidden");
+    dom.sectionVisit.classList.add("hidden");
+    dom.sectionAr.classList.add("hidden");
 
     if (type === "visit") {
         document.body.className = "pb-10 theme-visit";
-        document.getElementById("section-visit").classList.remove("hidden");
+        dom.sectionVisit.classList.remove("hidden");
         document.getElementById("tab-visit").classList.add("active-visit");
     } else {
         document.body.className = "pb-10 theme-ar";
-        document.getElementById("section-ar").classList.remove("hidden");
+        dom.sectionAr.classList.remove("hidden");
         document.getElementById("tab-ar").classList.add("active-ar");
         generateTimeSlots();
         showArNotice();
@@ -406,16 +320,16 @@ function switchTab(type) {
 }
 
 function switchAdminSubTab(tab) {
-    document.getElementById("admin-visit-logs").classList.add("hidden");
-    document.getElementById("admin-ar-logs").classList.add("hidden");
+    dom.adminVisitLogs.classList.add("hidden");
+    dom.adminArLogs.classList.add("hidden");
     document.getElementById("subtab-visit-logs").classList.remove("active-visit");
     document.getElementById("subtab-ar-logs").classList.remove("active-ar");
 
     if (tab === "visit-logs") {
-        document.getElementById("admin-visit-logs").classList.remove("hidden");
+        dom.adminVisitLogs.classList.remove("hidden");
         document.getElementById("subtab-visit-logs").classList.add("active-visit");
     } else {
-        document.getElementById("admin-ar-logs").classList.remove("hidden");
+        dom.adminArLogs.classList.remove("hidden");
         document.getElementById("subtab-ar-logs").classList.add("active-ar");
     }
 }
@@ -432,14 +346,12 @@ function togglePurpose(el) {
     el.classList.toggle("active");
 }
 
-/* ==================== 팝업함수 ( AR) ==================== */
-
 function showArNotice() {
-    document.getElementById("ar-notice-modal").classList.remove("hidden");
+    dom.arNoticeModal.classList.remove("hidden");
 
-    const btn = document.getElementById("arNoticeBtn");
-    const cover = document.getElementById("btnCover");
-    const text = document.getElementById("btnText");
+    const btn = dom.arNoticeBtn;
+    const cover = dom.btnCover;
+    const text = dom.btnText;
 
     btn.disabled = true;
     btn.classList.add("cursor-not-allowed");
@@ -454,7 +366,7 @@ function showArNotice() {
     text.textContent = `확인했습니다 (${sec})`;
 
     const timer = setInterval(() => {
-        sec--;
+        sec -= 1;
         if (sec > 0) {
             text.textContent = `확인했습니다 (${sec})`;
         } else {
@@ -467,18 +379,14 @@ function showArNotice() {
 }
 
 function closeArNotice() {
-    document.getElementById("ar-notice-modal").classList.add("hidden");
+    dom.arNoticeModal.classList.add("hidden");
 }
-
-/* ==================== AR 예약 이용자 카드 ==================== */
-
-let arCount = 0;
 
 function changeArCount(delta) {
     const newCount = arCount + delta;
     if (newCount < 1) return;
 
-    const container = document.getElementById("ar-user-container");
+    const container = dom.arUserContainer;
 
     if (delta > 0) {
         const div = document.createElement("div");
@@ -501,14 +409,14 @@ function changeArCount(delta) {
         container.appendChild(div);
         refreshIcons();
         div.querySelector("input")?.focus();
-    } else if (delta < 0) {
+    } else {
         if (container.lastElementChild) {
             container.lastElementChild.remove();
         }
     }
 
     arCount = newCount;
-    document.getElementById("ar-count-display").innerText = arCount;
+    dom.arCountDisplay.innerText = arCount;
 }
 
 function selectGender(btn) {
@@ -517,49 +425,6 @@ function selectGender(btn) {
         button.className = "flex-1 py-2.5 text-sm font-bold text-slate-400";
     });
     btn.className = "flex-1 py-2.5 bg-white rounded-xl text-sm font-bold shadow-sm";
-}
-
-/* ==================== 시간대 버튼 생성 ==================== */
-
-function generateTimeSlots() {
-    const container = document.getElementById("time-container");
-    const indicator = document.getElementById("ar-day-indicator");
-
-    container.innerHTML = "";
-
-    const now = new Date();
-    const day = now.getDay();
-    const isWeekend = day === 0 || day === 6;
-    const todayStr = formatLocalDate(now);
-    const reservedSlots = arLogsToday
-        .filter((log) => log.date === todayStr)
-        .map((log) => log.timeSlot);
-
-    if (isWeekend) {
-        indicator.innerText = "🗓️ 주말 운영 (10:00~17:30)";
-        indicator.className = "mb-4 inline-block px-4 py-1.5 rounded-full text-xs font-bold bg-orange-100 text-orange-700";
-
-        for (let h = 10; h < 18; h += 1) {
-            if (h === 12) continue;
-            ["00", "30"].forEach((m) => {
-                if (h === 17 && m === "30") return;
-                addTimeBtn(container, h, m, reservedSlots);
-            });
-        }
-    } else {
-        indicator.innerText = "🗓️ 평일 운영 (10:00~20:30)";
-        indicator.className = "mb-4 inline-block px-4 py-1.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700";
-
-        for (let h = 10; h <= 20; h += 1) {
-            if (h === 12) continue;
-            ["00", "30"].forEach((m) => {
-                if (h === 20 && m === "30") return;
-                addTimeBtn(container, h, m, reservedSlots);
-            });
-        }
-    }
-
-    refreshIcons();
 }
 
 function addTimeBtn(container, h, m, reservedSlots) {
@@ -587,7 +452,42 @@ function addTimeBtn(container, h, m, reservedSlots) {
     container.appendChild(btn);
 }
 
-/* ==================== 필터 함수 ==================== */
+function generateTimeSlots() {
+    dom.timeContainer.innerHTML = "";
+    const now = new Date();
+    const day = now.getDay();
+    const isWeekend = day === 0 || day === 6;
+    const todayStr = formatLocalDate(now);
+    const reservedSlots = arLogsToday
+        .filter((log) => log.date === todayStr)
+        .map((log) => log.timeSlot);
+
+    if (isWeekend) {
+        dom.arDayIndicator.innerText = "🗓️ 주말 운영 (10:00~17:30)";
+        dom.arDayIndicator.className = "mb-4 inline-block px-4 py-1.5 rounded-full text-xs font-bold bg-orange-100 text-orange-700";
+
+        for (let h = 10; h < 18; h += 1) {
+            if (h === 12) continue;
+            ["00", "30"].forEach((m) => {
+                if (h === 17 && m === "30") return;
+                addTimeBtn(dom.timeContainer, h, m, reservedSlots);
+            });
+        }
+    } else {
+        dom.arDayIndicator.innerText = "🗓️ 평일 운영 (10:00~20:30)";
+        dom.arDayIndicator.className = "mb-4 inline-block px-4 py-1.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700";
+
+        for (let h = 10; h <= 20; h += 1) {
+            if (h === 12) continue;
+            ["00", "30"].forEach((m) => {
+                if (h === 20 && m === "30") return;
+                addTimeBtn(dom.timeContainer, h, m, reservedSlots);
+            });
+        }
+    }
+
+    refreshIcons();
+}
 
 function setFilter(type) {
     currentFilter = type;
@@ -602,11 +502,10 @@ function setFilter(type) {
         document.getElementById("filter-" + type).classList.add("active");
     }
 
-    const customDateBox = document.getElementById("custom-date-inputs");
     if (type === "custom") {
-        customDateBox.classList.remove("hidden");
+        dom.customDateInputs.classList.remove("hidden");
     } else {
-        customDateBox.classList.add("hidden");
+        dom.customDateInputs.classList.add("hidden");
     }
 
     if (type === "all") {
@@ -616,18 +515,17 @@ function setFilter(type) {
 
 function isDateInRange(dateStr) {
     const targetDate = new Date(dateStr);
-
     if (currentFilter === "all") return true;
 
     if (currentFilter === "month") {
-        const selectedYear = parseInt(document.getElementById("filter-year-select").value, 10);
-        const selectedMonth = parseInt(document.getElementById("filter-month-select").value, 10);
+        const selectedYear = parseInt(dom.filterYearSelect.value, 10);
+        const selectedMonth = parseInt(dom.filterMonthSelect.value, 10);
         return targetDate.getMonth() === selectedMonth && targetDate.getFullYear() === selectedYear;
     }
 
     if (currentFilter === "custom") {
-        const start = document.getElementById("start-date").value;
-        const end = document.getElementById("end-date").value;
+        const start = dom.startDate.value;
+        const end = dom.endDate.value;
         if (!start || !end) return true;
         const startDate = new Date(start);
         const endDate = new Date(end);
@@ -638,12 +536,9 @@ function isDateInRange(dateStr) {
     return true;
 }
 
-/* ==================== 통계 테이블 렌더링 ==================== */
-
 function renderStatsTable(data, categories, targetBodyId, targetFooterId, themeClass) {
     const body = document.getElementById(targetBodyId);
     const footer = document.getElementById(targetFooterId);
-
     body.innerHTML = "";
 
     let grandTotal = 0;
@@ -698,33 +593,15 @@ function renderStatsTable(data, categories, targetBodyId, targetFooterId, themeC
     footer.innerHTML += `<td>${footerYouth}</td><td>${footerYoung}</td><td class="${finalClass}">${grandTotal}</td>`;
 }
 
-/* ==================== 관리자 대시보드 업데이트 ==================== */
-
 function updateAdminDashboard() {
-    if (!document.getElementById("visit-log-body") || !document.getElementById("ar-log-body")) {
+    if (!dom.visitLogBody || !dom.arLogBody) {
         return;
     }
 
     const filteredVisitLogs = visitLogs.filter((log) => isDateInRange(log.date));
     const filteredArLogs = arLogs.filter((log) => isDateInRange(log.date));
-
-    /* ============================================================
-     * [수정] 메인 "이용 목적 및 연령별 통계" 테이블
-     *
-     * 기존: PURPOSES에서 스터디룸을 제외한 4개 카테고리만 집계
-     * 변경: PURPOSES 전체(스터디룸 포함 5개) + AR실 = 총 6개 카테고리
-     *
-     * - 휴식/독서/보드게임/탁구/스터디룸 → visitLogs에서 집계 (기존 로직 동일)
-     * - AR실 → arLogs에서 집계 (단독 AR 통계와 동일한 데이터 소스)
-     *
-     * 단독 스터디룸 테이블(study-stats-body)과
-     * 단독 AR 통계 테이블(ar-stats-body)은 아래에서 그대로 유지됨.
-     * ============================================================ */
-
-    // 메인 테이블 카테고리: PURPOSES 전체 + AR실
     const mainCategories = [...PURPOSES, "AR실"];
 
-    // 메인 테이블 데이터 구조 초기화
     const vStats = {};
     mainCategories.forEach((category) => {
         vStats[category] = {};
@@ -733,20 +610,14 @@ function updateAdminDashboard() {
         });
     });
 
-    // visitLogs → 휴식/독서/보드게임/탁구/스터디룸 집계
     filteredVisitLogs.forEach((log) => {
         (log.purposes || []).forEach((purpose) => {
-            if (
-                PURPOSES.includes(purpose) &&
-                vStats[purpose] &&
-                vStats[purpose][log.age]
-            ) {
+            if (PURPOSES.includes(purpose) && vStats[purpose] && vStats[purpose][log.age]) {
                 vStats[purpose][log.age][log.gender] += 1;
             }
         });
     });
 
-    // arLogs → AR실 집계 (단독 AR 테이블과 동일한 데이터)
     filteredArLogs.forEach((log) => {
         (log.users || []).forEach((user) => {
             if (vStats["AR실"][user.age]) {
@@ -755,12 +626,8 @@ function updateAdminDashboard() {
         });
     });
 
-    // 메인 테이블 렌더링
     renderStatsTable(vStats, mainCategories, "visit-stats-body", "visit-stats-footer", "sum-col");
 
-    /* ============================================================
-     * 단독 스터디룸 테이블 — 변경 없음
-     * ============================================================ */
     const studyStats = { "스터디룸": {} };
     AGE_GROUPS.forEach((age) => {
         studyStats["스터디룸"][age] = { 남: 0, 여: 0 };
@@ -774,9 +641,6 @@ function updateAdminDashboard() {
 
     renderStatsTable(studyStats, ["스터디룸"], "study-stats-body", "study-stats-footer", "sum-col");
 
-    /* ============================================================
-     * 단독 AR 통계 테이블 — 변경 없음
-     * ============================================================ */
     const arStats = { "AR 이용": {} };
     AGE_GROUPS.forEach((age) => {
         arStats["AR 이용"][age] = { 남: 0, 여: 0 };
@@ -792,12 +656,7 @@ function updateAdminDashboard() {
 
     renderStatsTable(arStats, ["AR 이용"], "ar-stats-body", "ar-stats-footer", "ar-sum-col");
 
-    /* ============================================================
-     * 상세 방문 내역 테이블 — 변경 없음
-     * ============================================================ */
-    const visitBody = document.getElementById("visit-log-body");
-    visitBody.innerHTML = "";
-
+    dom.visitLogBody.innerHTML = "";
     filteredVisitLogs.slice().reverse().forEach((log) => {
         const tr = document.createElement("tr");
         tr.className = "border-b hover:bg-slate-50";
@@ -825,18 +684,12 @@ function updateAdminDashboard() {
             </td>
         `;
 
-        visitBody.appendChild(tr);
+        dom.visitLogBody.appendChild(tr);
     });
 
-    document.getElementById("visit-count-badge").innerText =
-        filteredVisitLogs.length + "건";
+    dom.visitCountBadge.innerText = filteredVisitLogs.length + "건";
 
-    /* ============================================================
-     * 상세 AR 예약 현황 테이블 — 변경 없음
-     * ============================================================ */
-    const arBody = document.getElementById("ar-log-body");
-    arBody.innerHTML = "";
-
+    dom.arLogBody.innerHTML = "";
     filteredArLogs.slice().reverse().forEach((log) => {
         const tr = document.createElement("tr");
         tr.className = "border-b hover:bg-indigo-50/30";
@@ -866,14 +719,11 @@ function updateAdminDashboard() {
             </td>
         `;
 
-        arBody.appendChild(tr);
+        dom.arLogBody.appendChild(tr);
     });
 
-    document.getElementById("ar-count-badge").innerText =
-        filteredArLogs.length + "건";
+    dom.arCountBadge.innerText = filteredArLogs.length + "건";
 }
-
-/* ==================== 폼 제출 (Firebase 저장) ==================== */
 
 function submitForm(type) {
     const now = new Date();
@@ -881,33 +731,18 @@ function submitForm(type) {
     const dateStr = formatLocalDate(now);
 
     if (type === "visit") {
-
         if (isSubmittingVisit) return;
 
         const purposes = Array.from(document.querySelectorAll(".v-purpose.active")).map((purpose) => purpose.querySelector("span").innerText);
-
         if (purposes.length === 0) {
             showMessage("이용 목적을 선택해 주세요!");
             return;
         }
 
-        const users = Array.from(document.querySelectorAll("#visit-user-container .ar-user-card")).map((card) => {
-            const genderBtn = Array.from(card.querySelectorAll("button")).find((button) => button.classList.contains("bg-white"));
-            return {
-                name: card.querySelector("input").value.trim(),
-                gender: genderBtn ? genderBtn.innerText.trim() : "남",
-                age: card.querySelector("select").value
-            };
-        });
-
-        if (users.length === 0 || users.some((user) => !user.name || !user.age)) {
-            showMessage("모든 방문자 정보를 입력해 주세요!");
-            return;
-        }
-
-        const invalidUser = users.find((user) => !isValidName(user.name) || !isValidGender(user.gender) || !isValidAge(user.age));
-        if (invalidUser) {
-            showMessage("이름은 한글/영문/숫자 10자 이내로 입력해 주세요!");
+        const users = collectUsers("#visit-user-container");
+        const validationError = validateUsers(users);
+        if (validationError) {
+            showMessage(validationError);
             return;
         }
 
@@ -923,7 +758,7 @@ function submitForm(type) {
         Promise.all(savePromises)
             .then(() => {
                 showMessage(`${users.length}명 방문 등록이 완료되었습니다! ✓`, "success");
-                document.getElementById("visit-user-container").innerHTML = "";
+                dom.visitUserContainer.innerHTML = "";
                 document.querySelectorAll(".v-purpose").forEach((button) => button.classList.remove("active"));
                 visitCount = 0;
                 changeVisitCount(1);
@@ -936,40 +771,23 @@ function submitForm(type) {
                 isSubmittingVisit = false;
                 if (visitSubmitBtn) visitSubmitBtn.disabled = false;
             });
-
     } else {
-
         if (isSubmittingAr) return;
 
         const timeSlot = document.querySelector(".time-slot-btn.active")?.querySelector("span")?.innerText;
-
         if (!timeSlot) {
             showMessage("시간을 선택해 주세요!");
             return;
         }
 
-        const users = Array.from(document.querySelectorAll("#ar-user-container .ar-user-card")).map((card) => {
-            const genderBtn = Array.from(card.querySelectorAll("button")).find((button) => button.classList.contains("bg-white"));
-            return {
-                name: card.querySelector("input").value.trim(),
-                gender: genderBtn ? genderBtn.innerText.trim() : "남",
-                age: card.querySelector("select").value
-            };
-        });
-
-        if (users.length === 0 || users.some((user) => !user.name || !user.age)) {
-            showMessage("정보를 모두 입력해 주세요!");
-            return;
-        }
-
-        const invalidUser = users.find((user) => !isValidName(user.name) || !isValidGender(user.gender) || !isValidAge(user.age));
-        if (invalidUser) {
-            showMessage("이름은 한글/영문/숫자 10자 이내로 입력해 주세요!");
+        const users = collectUsers("#ar-user-container");
+        const validationError = validateUsers(users);
+        if (validationError) {
+            showMessage(validationError);
             return;
         }
 
         const logData = { date: dateStr, timeSlot, users };
-
         isSubmittingAr = true;
         const arSubmitBtn = document.querySelector("#section-ar .submit-btn");
         if (arSubmitBtn) arSubmitBtn.disabled = true;
@@ -977,13 +795,10 @@ function submitForm(type) {
         reserveSlotAndSaveArLog(dateStr, timeSlot, logData)
             .then(() => {
                 showMessage("AR 예약이 완료되었습니다! ✓", "success");
-                document.getElementById("ar-user-container").innerHTML = "";
-                document.querySelectorAll(".time-slot-btn").forEach((button) => {
-                    button.classList.remove("active");
-                });
+                dom.arUserContainer.innerHTML = "";
+                document.querySelectorAll(".time-slot-btn").forEach((button) => button.classList.remove("active"));
                 arCount = 0;
-                document.getElementById("ar-user-container").innerHTML = "";
-                document.getElementById("ar-count-display").innerText = "0";
+                dom.arCountDisplay.innerText = "0";
                 changeArCount(1);
                 generateTimeSlots();
                 switchTab("visit");
@@ -1003,8 +818,6 @@ function submitForm(type) {
             });
     }
 }
-
-/* ==================== 엑셀 다운로드 ==================== */
 
 function exportToExcel(type) {
     let csvContent = "\uFEFF";
@@ -1043,11 +856,7 @@ function exportToExcel(type) {
     link.click();
 }
 
-/* ==================== 필터 초기화 ==================== */
-
 function initFilterOptions() {
-    const yearSelect = document.getElementById("filter-year-select");
-    const monthSelect = document.getElementById("filter-month-select");
     const now = new Date();
 
     for (let y = now.getFullYear() - 1; y <= now.getFullYear() + 1; y += 1) {
@@ -1057,21 +866,17 @@ function initFilterOptions() {
         if (y === now.getFullYear()) {
             option.selected = true;
         }
-        yearSelect.appendChild(option);
+        dom.filterYearSelect.appendChild(option);
     }
 
-    monthSelect.value = now.getMonth();
+    dom.filterMonthSelect.value = now.getMonth();
 }
-
-/* ==================== 방문 등록 인원수 ==================== */
-
-let visitCount = 0;
 
 function changeVisitCount(delta) {
     const newCount = visitCount + delta;
     if (newCount < 1) return;
 
-    const container = document.getElementById("visit-user-container");
+    const container = dom.visitUserContainer;
 
     if (delta > 0) {
         const div = document.createElement("div");
@@ -1094,16 +899,16 @@ function changeVisitCount(delta) {
         container.appendChild(div);
         refreshIcons();
         div.querySelector("input")?.focus();
-    } else if (delta < 0) {
+    } else {
         if (container.lastElementChild) {
             container.lastElementChild.remove();
         }
     }
 
     visitCount = newCount;
-    document.getElementById("v-count-display").innerText = visitCount;
+    dom.vCountDisplay.innerText = visitCount;
 
-    const minusBtn = document.getElementById("v-count-minus");
+    const minusBtn = dom.vCountMinus;
     if (visitCount === 1) {
         minusBtn.classList.add("opacity-40", "cursor-not-allowed");
     } else {
@@ -1111,13 +916,11 @@ function changeVisitCount(delta) {
     }
 }
 
-/* ==================== 페이지 초기화 ==================== */
-
 function initializePage() {
     const now = new Date();
-    document.getElementById("current-date").innerText = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
-    document.getElementById("start-date").value = formatLocalDate(now);
-    document.getElementById("end-date").value = formatLocalDate(now);
+    dom.currentDate.innerText = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
+    dom.startDate.value = formatLocalDate(now);
+    dom.endDate.value = formatLocalDate(now);
 
     initFilterOptions();
     changeArCount(1);

@@ -1,62 +1,85 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
+    <!-- 문서 메타정보 설정 -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>시흥시능곡청소년문화의집 - 통합 서비스</title>
 
-    <!-- Tailwind / 아이콘 CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@0.469.0"></script>
+    <!-- 외부 CDN 라이브러리 -->
+    <script src="https://cdn.tailwindcss.com"></script> <!-- Tailwind CSS -->
+    <!-- [보안 수정] @latest 대신 버전을 고정하여 공급망(Supply-chain) 공격 표면을 줄임 -->
+    <script src="https://unpkg.com/lucide@0.469.0"></script> <!-- 아이콘 라이브러리 -->
 
     <!-- 분리한 CSS 파일 연결 -->
-    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./nchm.css">
 </head>
+
 <body class="pb-10 theme-visit">
+    <!-- 알림 메시지 박스 (숨겨진 상태로 시작) -->
     <div id="custom-alert">정보를 모두 입력해 주세요!</div>
 
-    <!-- 상단 네비게이션 -->
+    <!-- ==================== 상단 네비게이션 바 ==================== -->
     <nav class="navbar">
+        <!-- 로고 -->
         <a href="#" class="logo-link">
             <img src="https://i.ibb.co/Dg5H6WL3/3.png" alt="시흥시능곡청소년문화의집" class="logo-img">
         </a>
+        
+        <!-- 우측 버튼 영역 -->
         <div class="flex items-center space-x-3">
+            <!-- 현재 날짜 표시 -->
             <span class="bg-slate-50 border border-slate-200 text-slate-600 text-[12px] font-bold px-4 py-2 rounded-full" id="current-date"></span>
+            
+            <!-- 관리자 진입 버튼 -->
             <button id="admin-entry-btn" onclick="openPasswordModal()" class="bg-slate-100 text-slate-500 p-2.5 rounded-xl hover:bg-slate-200 transition-colors">
                 <i data-lucide="settings" class="w-5 h-5"></i>
             </button>
+            
+            <!-- 관리자 모드 종료 버튼 (숨겨진 상태) -->
             <button id="exit-admin-btn" onclick="exitAdmin()" class="hidden bg-red-100 text-red-600 p-2.5 rounded-xl hover:bg-red-200 transition-colors">
                 <i data-lucide="log-out" class="w-5 h-5"></i>
             </button>
         </div>
     </nav>
 
-    <!-- 메인 탭 메뉴 -->
+    <!-- ==================== 메인 탭 메뉴 (일반 사용자 모드) ==================== -->
     <div id="main-tabs" class="bg-white border-b flex justify-around p-5 mb-6 sticky top-[80px] z-40">
+        <!-- 방문 등록 탭 -->
         <button onclick="switchTab('visit')" id="tab-visit" class="tab-btn active-visit font-bold">방문 등록</button>
+        
+        <!-- AR 예약 탭 -->
         <button onclick="switchTab('ar')" id="tab-ar" class="tab-btn font-bold">AR 예약</button>
     </div>
 
-    <!-- 관리자용 대시보드 탭 메뉴 -->
+    <!-- ==================== 관리자 탭 메뉴 (관리자 모드에서만 표시) ==================== -->
     <div id="admin-tabs" class="hidden bg-white border-b flex justify-around p-5 mb-6 sticky top-[80px] z-40">
+        <!-- 방문 등록 내역 탭 -->
         <button onclick="switchAdminSubTab('visit-logs')" id="subtab-visit-logs" class="tab-btn active-visit font-bold">방문 등록 내역</button>
+        
+        <!-- AR 예약 현황 탭 -->
         <button onclick="switchAdminSubTab('ar-logs')" id="subtab-ar-logs" class="tab-btn font-bold">AR 예약 현황</button>
     </div>
 
+    <!-- ==================== 메인 콘텐츠 컨테이너 ==================== -->
     <div class="max-w-xl mx-auto px-4" id="main-content-container">
-        <!-- 1. 방문 등록 섹션 -->
+        
+        <!-- ==================== 1. 방문 등록 섹션 ==================== -->
         <div id="section-visit" class="animate-fadeIn">
             <div class="gradient-banner rounded-t-[30px] p-8 sm:p-10 text-center text-white">
                 <h1 class="text-2xl sm:text-3xl font-black mb-4 leading-tight tracking-tight">시흥시능곡청소년문화의집<br>방문을 환영합니다 ✨</h1>
                 <div class="bg-white/20 backdrop-blur-sm inline-block px-5 py-2 rounded-xl border border-white/30 text-[13px] sm:text-sm font-medium">문화의집 이용하기 전에 정보를 입력해주세요</div>
             </div>
-            <div class="bg-white rounded-b-[30px] p-8 card-shadow space-y-8">
-                <div class="visit-user-header">
-                    <h2 class="text-xl sm:text-2xl font-black text-slate-800 flex items-center gap-3"><i data-lucide="user-plus" class="w-7 h-7 text-blue-500"></i> 이용자 정보</h2>
-                    <div class="visit-count-controls">
-                        <button id="visit-count-minus" type="button" onclick="changeVisitCount(-1)" class="visit-count-btn visit-count-btn-minus">−</button>
-                        <span id="visit-count-display" class="visit-count-display">1</span>
-                        <button type="button" onclick="changeVisitCount(1)" class="visit-count-btn visit-count-btn-plus">+</button>
+         
+                <div class="bg-white rounded-b-[30px] p-8 card-shadow space-y-8">
+               <div class="flex justify-between items-center">
+                    <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                        <i data-lucide="user-plus" class="w-6 h-6 text-blue-500"></i> 방문자 정보
+                    </h2>
+                    <div class="flex items-center gap-3">
+                        <button id="v-count-minus" onclick="changeVisitCount(-1)" class="w-9 h-9 rounded-xl bg-slate-200 text-slate-500 text-xl font-black flex items-center justify-center opacity-40 cursor-not-allowed transition-all">−</button>
+                        <span id="v-count-display" class="text-xl font-black text-slate-800 w-6 text-center">1</span>
+                        <button onclick="changeVisitCount(1)" class="w-9 h-9 rounded-xl bg-blue-500 text-white text-xl font-black flex items-center justify-center hover:bg-blue-600 transition-all">+</button>
                     </div>
                 </div>
                 <div id="visit-user-container" class="space-y-4"></div>
@@ -67,7 +90,10 @@
                         <h2 class="text-xl font-black text-blue-900">오늘 무엇을 하며 보낼까요?</h2>
                         <p class="text-blue-600 text-[13.5px] mt-2 font-bold">(여러 개 선택이 가능해요)</p>
                     </div>
+                    <p class="text-blue-600 text-[13.5px] mt-2 font-bold text-center">※ 활동실 이용 시에는 '휴식'을 선택해 주세요.</p>
+                
                     <div class="grid grid-cols-5 gap-2">
+                
                         <button onclick="togglePurpose(this)" class="choice-btn v-purpose flex flex-col items-center p-3 rounded-2xl">
                             <img src="https://em-content.zobj.net/source/apple/354/hot-beverage_2615.png" class="w-8 h-8 mb-1" alt="휴식">
                             <span class="text-[12px] font-bold">휴식</span>
@@ -107,11 +133,18 @@
                 <div class="bg-white/20 backdrop-blur-sm inline-block px-6 py-2.5 rounded-xl border border-white/30 text-sm">AR 이용하기 전에 정보를 입력해주세요</div>
             </div>
             <div class="bg-white rounded-b-[30px] p-6 card-shadow space-y-8">
+                
                 <div class="flex justify-between items-center">
-                    <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2"><i data-lucide="user-plus" class="w-6 h-6 text-indigo-500"></i> 이용자 정보</h2>
-                    <button onclick="addUserForm()" class="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-xl text-sm font-bold">+ 인원 추가</button>
-                </div>
-                <div id="ar-user-container" class="space-y-4"></div>
+    <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2"><i data-lucide="user-plus" class="w-6 h-6 text-indigo-500"></i> 이용자 정보</h2>
+    <div class="flex items-center gap-3">
+        <button onclick="changeArCount(-1)" class="w-9 h-9 rounded-xl bg-slate-200 text-slate-500 text-xl font-black flex items-center justify-center hover:bg-slate-300 transition-all">−</button>
+        <span id="ar-count-display" class="text-xl font-black text-slate-800 w-6 text-center">1</span>
+        <button onclick="changeArCount(1)" class="w-9 h-9 rounded-xl bg-indigo-500 text-white text-xl font-black flex items-center justify-center hover:bg-indigo-600 transition-all">+</button>
+    </div>
+</div>
+<div id="ar-user-container" class="space-y-4"></div>
+
+                
                 <div class="border-t pt-8">
                     <h2 class="text-xl font-bold text-indigo-900 mb-6 flex items-center gap-2">
                         <i data-lucide="calendar-check" class="w-6 h-6"></i> 예약 시간대 선택 <span class="text-red-500">*</span>
@@ -170,7 +203,17 @@
                 </div>
                 <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden card-shadow">
                     <table class="w-full text-sm text-center">
-                        <thead class="bg-slate-50 text-slate-500 font-bold border-b"><tr><th class="py-3">날짜</th><th>시간</th><th>이름</th><th>성별</th><th>나이</th><th>목적</th><th>관리</th></tr></thead>
+                        <thead class="bg-slate-50 text-slate-500 font-bold border-b">
+                            <tr>
+                                <th class="py-3">날짜</th>
+                                <th class="py-3">시간</th>
+                                <th class="py-3">이름</th>
+                                <th class="py-3">성별</th>
+                                <th class="py-3">나이</th>
+                                <th class="py-3">목적</th>
+                                <th class="py-3">관리</th>
+                            </tr>
+                        </thead>
                         <tbody id="visit-log-body"></tbody>
                     </table>
                 </div>
@@ -188,7 +231,16 @@
                 </div>
                 <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden card-shadow">
                     <table class="w-full text-sm text-center">
-                        <thead class="bg-slate-50 text-slate-500 font-bold border-b"><tr><th class="py-3">예약날짜</th><th class="py-3">예약시간</th><th>대표자</th><th>총 인원</th><th>이용자 명단 (성별, 나이)</th><th>관리</th></tr></thead>
+                        <thead class="bg-slate-50 text-slate-500 font-bold border-b">
+                            <tr>
+                                <th class="py-3">예약날짜</th>
+                                <th class="py-3">예약시간</th>
+                                <th>대표자</th>
+                                <th>총 인원</th>
+                                <th>이용자 명단 (성별, 나이)</th>
+                                <th>관리</th>
+                            </tr>
+                        </thead>
                         <tbody id="ar-log-body"></tbody>
                     </table>
                 </div>
@@ -200,6 +252,7 @@
     <div id="password-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
         <div class="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl animate-fadeIn text-center">
             <h3 class="text-xl font-bold text-slate-800 mb-6">관리자 인증</h3>
+            <!-- [보안 수정] maxlength="8" → "64": 비밀번호 길이를 인위적으로 제한하지 않도록 변경 (Authentication 강화) -->
             <input type="password" id="admin-password-input" maxlength="64" placeholder="••••" class="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-4 text-3xl text-center tracking-[1rem] focus:outline-none focus:border-slate-800 mb-6" onkeyup="if(event.key === 'Enter') verifyAdminPassword()">
             <div class="flex gap-3">
                 <button onclick="closePasswordModal()" class="flex-1 py-4 bg-slate-100 text-slate-500 font-bold rounded-2xl">취소</button>
@@ -208,23 +261,49 @@
         </div>
     </div>
 
+    <!-- AR 안내 팝업 -->
+<div id="ar-notice-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
+    <div class="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl animate-fadeIn text-center">
+        <div class="text-5xl mb-4">📢</div>
+        <h3 class="text-xl font-black text-slate-800 mb-4">예약 전 꼭 확인하세요</h3>
+        <div class="bg-indigo-50 rounded-2xl p-5 pb-7 mb-6 text-left space-y-3">
+            <p class="text-indigo-900 font-bold text-base leading-relaxed">
+                •AR 체험은 팀당 <span class="text-indigo-600">30분</span> 이용입니다.
+            </p>
+            <p class="text-indigo-900 font-bold text-base leading-relaxed">
+                •한 팀당 <span class="text-indigo-600">예약은 1회만</span> 가능합니다.
+            </p>
+            <p class="text-indigo-900 font-bold text-base leading-relaxed">
+                다른 이용자를 위해 배려 부탁드립니다 !  
+            </p>
+        </div>
+       
+       <button
+    id="arNoticeBtn"
+    onclick="closeArNotice()"
+    disabled
+    class="relative overflow-hidden w-full py-4 bg-indigo-600 text-white font-black text-lg rounded-2xl cursor-not-allowed">
+
+    <!-- 흰색 막 -->
+    <div
+        id="btnCover"
+        class="absolute top-0 right-0 h-full bg-white/80"
+        style="width:100%;">
+    </div>
+
+    <span id="btnText" class="relative z-10">
+        확인했습니다 (3)
+    </span>
+
+</button>
+        
+    </div>
+</div>
     <!-- Firebase SDK (Realtime Database) -->
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-
-    <!-- 점진적 리팩토링: 기존 inline 이벤트를 유지하면서 역할별 JS 모듈로 분리 -->
-    <script src="./js/config.js"></script>
-    <script src="./js/firebase.js"></script>
-    <script src="./js/state.js"></script>
-    <script src="./js/utils.js"></script>
-    <script src="./js/validation.js"></script>
-    <script src="./js/ui.js"></script>
-    <script src="./js/visit.js"></script>
-    <script src="./js/reservation.js"></script>
-    <script src="./js/statistics.js"></script>
-    <script src="./js/admin.js"></script>
-    <script src="./js/excel.js"></script>
-    <script src="./js/main.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <!-- 분리한 JavaScript 파일 연결 -->
+    <script src="./nchm.js"></script>
 </body>
 </html>

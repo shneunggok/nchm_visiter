@@ -4,16 +4,33 @@
  * Firebase Realtime Database와 연동하여 데이터를 저장합니다.
  *
  * 수정 규칙:
- * 
  * 2. 데이터 저장 구조(AGE_GROUPS, PURPOSES)는 표준을 따르세요
  * 3. HTML 요소 ID명 변경 금지 (nchm.html과 연동)
  * 4. 스타일 수정은 nchm.css에서만 처리
  * ==========================================================
+ *
+ * [보안 패치]
+ * 1. Firebase Rules 강화에 맞춰 익명 인증(Anonymous Auth) 추가
+ * 2. 모든 동적 innerHTML 출력에 escapeHtml() 적용 (XSS)
+ * 3. 입력값 검증 강화 (Input Validation)
+ * 4. AR 예약 시간대 동시 예약 방지 Transaction 락 (Race Condition)
+ * 5. 제출 버튼 잠금 + 관리자 로그인 실패 잠금 (Rate Limiting)
+ * 6. 에러 상세 비노출 (Logging / Error Handling)
+ * 7. visitLogs 관리자 인증 시에만 구독 (Broken Access Control)
+ *
+ * [편의성 개선]
+ * 8. alert() 전면 제거 → 자동으로 사라지는 토스트 알림으로 교체
+ * 9. confirm() 전면 제거 → 삭제 버튼 클릭 즉시 삭제 처리
+ *
+ * [기능 추가 - 이번 수정]
+ * 10. 메인 "이용 목적 및 연령별 통계" 테이블에 스터디룸·AR실 행 추가
+ *     - 스터디룸: visitLogs 기반 (단독 스터디룸 테이블과 동일한 데이터)
+ *     - AR실: arLogs 기반 (단독 AR 통계 테이블과 동일한 데이터)
+ *     - 단독 스터디룸 테이블, 단독 AR 통계 테이블은 코드 변경 없음
+ * ==========================================================
  */
 
 /* ==================== Firebase 초기화 ==================== */
-
-
 
 const firebaseConfig = {
     apiKey: "AIzaSyDm2x9BtBynGBJYZ56eNjoAMH3fxIGdyyw",
@@ -26,16 +43,16 @@ const firebaseConfig = {
     measurementId: "G-W0YLVVCQ9R"
 };
 
-// Firebase 앱 초기화
 firebase.initializeApp(firebaseConfig);
 
-// Firebase Authentication
 const auth = firebase.auth();
 
-// Realtime Database 참조
 const db = firebase.database();
 const visitLogsRef = db.ref("visitLogs");
 const arLogsRef = db.ref("arLogs");
+const arSlotLocksRef = db.ref("arSlotLocks");
+
+const ADMIN_EMAIL = "shneunggok@gmail.com";
 
 /* ==================== 전역 상수 및 변수 ==================== */
 
@@ -51,35 +68,96 @@ const AGE_GROUPS = [
 
 const PURPOSES = ["휴식", "독서", "보드게임", "탁구", "스터디룸"];
 
-// 메모리에 올려둔 데이터 (Firebase에서 실시간으로 받아옴)
 let visitLogs = [];
 let arLogs = [];
+let arLogsToday = [];
+let arLogsTodayQuery = null;
 
-// 현재 필터 상태
 let currentFilter = "all";
+
+let isSubmittingVisit = false;
+let isSubmittingAr = false;
+
+let adminLoginFailCount = 0;
+let adminLoginLockedUntil = 0;
+const ADMIN_LOGIN_MAX_ATTEMPTS = 5;
+const ADMIN_LOGIN_LOCK_MS = 60 * 1000;
+
+/* ==================== 보안 유틸리티 ==================== */
+
+function escapeHtml(value) {
+    const div = document.createElement("div");
+    div.textContent = value === null || value === undefined ? "" : String(value);
+    return div.innerHTML;
+}
+
+function logError(context, error) {
+    const code = error && error.code ? error.code : "unknown_error";
+    console.error(`[nchm:${context}] ${code}`);
+}
+
+function sanitizeCsvField(value) {
+    const str = value === null || value === undefined ? "" : String(value);
+    if (/^[=+\-@]/.test(str)) {
+        return "'" + str;
+    }
+    return str;
+}
+
+function isValidName(name) {
+    return typeof name === "string" && /^[가-힣a-zA-Z0-9\s]{1,10}$/.test(name.trim());
+}
+
+function isValidAge(age) {
+    return AGE_GROUPS.includes(age);
+}
+
+function isValidGender(gender) {
+    return gender === "남" || gender === "여";
+}
 
 /* ==================== Firebase 데이터 불러오기 ==================== */
 
-/**
- * Firebase에서 방문 등록 데이터를 실시간으로 구독합니다.
- * 데이터가 바뀔 때마다 자동으로 visitLogs를 업데이트합니다.
- */
-function initFirebaseListeners() {
-    visitLogsRef.on("value", (snapshot) => {
-        visitLogs = [];
-        snapshot.forEach((child) => {
-            visitLogs.push({ _key: child.key, ...child.val() });
-        });
-        updateAdminDashboard();
-    });
+function subscribeArLogsToday() {
+    if (arLogsTodayQuery) arLogsTodayQuery.off();
 
+    const todayStr = formatLocalDate(new Date());
+    arLogsTodayQuery = arLogsRef.orderByChild("date").equalTo(todayStr);
+
+    arLogsTodayQuery.on("value", (snapshot) => {
+        arLogsToday = [];
+        snapshot.forEach((child) => {
+            arLogsToday.push({ _key: child.key, ...child.val() });
+        });
+        if (!document.getElementById("section-ar").classList.contains("hidden")) {
+            generateTimeSlots();
+        }
+    }, (error) => {
+        logError("arLogsTodayQuery.on", error);
+    });
+}
+
+function subscribeArLogsAll() {
+    if (arLogsTodayQuery) {
+        arLogsTodayQuery.off();
+        arLogsTodayQuery = null;
+    }
+    arLogsRef.off();
     arLogsRef.on("value", (snapshot) => {
         arLogs = [];
         snapshot.forEach((child) => {
             arLogs.push({ _key: child.key, ...child.val() });
         });
         updateAdminDashboard();
+    }, (error) => {
+        logError("arLogsRef.on(all)", error);
     });
+}
+
+function unsubscribeArLogsAll() {
+    arLogsRef.off();
+    arLogs = [];
+    subscribeArLogsToday();
 }
 
 /* ==================== 유틸리티 함수 ==================== */
@@ -97,27 +175,58 @@ function formatLocalDate(date = new Date()) {
     return `${year}-${month}-${day}`;
 }
 
-/**
- * Firebase에 방문 등록 데이터 저장
- */
 function saveVisitLog(logData) {
     return visitLogsRef.push(logData);
 }
 
-/**
- * Firebase에 AR 예약 데이터 저장
- */
 function saveArLog(logData) {
     return arLogsRef.push(logData);
 }
 
-function showMessage(msg) {
+function reserveSlotAndSaveArLog(dateStr, timeSlot, logData) {
+    const slotKey = `${dateStr}_${timeSlot}`.replace(/[.#$\[\]/]/g, "-");
+    const lockRef = arSlotLocksRef.child(slotKey);
+
+    return lockRef.transaction((current) => {
+        if (current === null) {
+            return true;
+        }
+        return;
+    }).then((result) => {
+        if (!result.committed) {
+            const err = new Error("SLOT_TAKEN");
+            err.code = "SLOT_TAKEN";
+            throw err;
+        }
+        return saveArLog(logData);
+    });
+}
+
+let _toastTimer = null;
+
+function showMessage(msg, type = "error") {
     const box = document.getElementById("custom-alert");
+
+    if (_toastTimer) {
+        clearTimeout(_toastTimer);
+        _toastTimer = null;
+    }
+
     box.innerText = msg;
+
+    box.className = "";
+    if (type === "success") box.classList.add("success");
+    if (type === "info")    box.classList.add("info");
+
     box.style.display = "block";
-    setTimeout(() => {
+
+    const duration = Math.min(4000, Math.max(2500, msg.length * 60));
+
+    _toastTimer = setTimeout(() => {
         box.style.display = "none";
-    }, 2000);
+        box.className = "";
+        _toastTimer = null;
+    }, duration);
 }
 
 /* ==================== 관리자 인증 함수 ==================== */
@@ -126,72 +235,77 @@ function openPasswordModal() {
     document.getElementById("password-modal").classList.remove("hidden");
     document.getElementById("admin-password-input").value = "";
     document.getElementById("admin-password-input").focus();
+    updateAdminLoginButtonState();
 }
 
 function closePasswordModal() {
     document.getElementById("password-modal").classList.add("hidden");
 }
 
-/**
- * 관리자 비밀번호 검증
+function updateAdminLoginButtonState() {
+    const btn = document.getElementById("admin-verify-btn");
+    if (!btn) return;
+    const remainingMs = adminLoginLockedUntil - Date.now();
+    if (remainingMs > 0) {
+        btn.disabled = true;
+        const remainingSec = Math.ceil(remainingMs / 1000);
+        showMessage(`로그인 시도가 너무 많습니다. ${remainingSec}초 후 다시 시도해 주세요.`);
+    } else {
+        btn.disabled = false;
+    }
+}
 
- */
 async function verifyAdminPassword() {
 
-    const password =
-        document.getElementById("admin-password-input").value;
+    if (Date.now() < adminLoginLockedUntil) {
+        updateAdminLoginButtonState();
+        return;
+    }
+
+    const password = document.getElementById("admin-password-input").value;
+
+    if (!password) {
+        showMessage("비밀번호를 입력해 주세요.");
+        return;
+    }
 
     try {
-
-        await auth.signInWithEmailAndPassword(
-            "choewonhyeog387@gmail.com",
+        const credential = await auth.signInWithEmailAndPassword(
+            ADMIN_EMAIL,
             password
         );
 
+        const tokenResult = await credential.user.getIdTokenResult();
+        if (tokenResult.claims.email !== ADMIN_EMAIL) {
+            await auth.signOut();
+            showMessage("관리자 권한이 없는 계정입니다.");
+            return;
+        }
+
+        adminLoginFailCount = 0;
+        adminLoginLockedUntil = 0;
+
         closePasswordModal();
-
-        // 로그인 완료 후 데이터 재구독
-        visitLogsRef.off();
-        arLogsRef.off();
-
-        visitLogsRef.on("value", (snapshot) => {
-            visitLogs = [];
-
-            snapshot.forEach((child) => {
-                visitLogs.push({
-                    _key: child.key,
-                    ...child.val()
-                });
-            });
-
-            updateAdminDashboard();
-        });
-
-        arLogsRef.on("value", (snapshot) => {
-            arLogs = [];
-
-            snapshot.forEach((child) => {
-                arLogs.push({
-                    _key: child.key,
-                    ...child.val()
-                });
-            });
-
-            updateAdminDashboard();
-        });
+        subscribeVisitLogs();
+        subscribeArLogsAll();
 
         setTimeout(() => {
             enterAdminMode();
         }, 500);
 
     } catch (e) {
+        logError("verifyAdminPassword", e);
 
-        console.error(e);
+        adminLoginFailCount += 1;
+        if (adminLoginFailCount >= ADMIN_LOGIN_MAX_ATTEMPTS) {
+            adminLoginLockedUntil = Date.now() + ADMIN_LOGIN_LOCK_MS;
+            adminLoginFailCount = 0;
+        }
 
         showMessage("비밀번호가 틀렸습니다.");
-
         document.getElementById("admin-password-input").value = "";
         document.getElementById("admin-password-input").focus();
+        updateAdminLoginButtonState();
     }
 }
 
@@ -214,37 +328,37 @@ function exitAdmin() {
     document.getElementById("section-admin").classList.add("hidden");
     document.getElementById("exit-admin-btn").classList.add("hidden");
     document.getElementById("admin-entry-btn").classList.remove("hidden");
+
+    visitLogsRef.off();
+    visitLogs = [];
+    unsubscribeArLogsAll();
+    auth.signOut()
+        .then(() => auth.signInAnonymously())
+        .catch((e) => logError("exitAdmin-reauth", e));
+
     switchTab("visit");
 }
 
-function deleteVisitLog(key) {
-
-    if (!confirm("이 방문기록을 삭제하시겠습니까?")) return;
-
-    visitLogsRef.child(key)
-        .remove()
-        .then(() => {
-            showMessage("삭제 완료");
-        })
-        .catch((err) => {
-            alert(err.message);
-        });
-}
-
 function deleteArLog(key) {
+    const log = arLogs.find((l) => l._key === key);
+    const slotKey = log
+        ? `${log.date}_${log.timeSlot}`.replace(/[.#$\[\]/]/g, "-")
+        : null;
 
-    if (!confirm("이 AR 예약을 삭제하시겠습니까?")) return;
+    const removeLog = arLogsRef.child(key).remove();
+    const removeLock = slotKey
+        ? arSlotLocksRef.child(slotKey).remove()
+        : Promise.resolve();
 
-    arLogsRef.child(key)
-        .remove()
+    Promise.all([removeLog, removeLock])
         .then(() => {
-            showMessage("삭제 완료");
+            showMessage("삭제되었습니다.", "info");
         })
         .catch((err) => {
-            alert(err.message);
+            logError("deleteArLog", err);
+            showMessage("삭제 중 오류가 발생했습니다.");
         });
 }
-
 /* ==================== 탭 전환 함수 ==================== */
 
 function switchTab(type) {
@@ -263,7 +377,7 @@ function switchTab(type) {
         document.getElementById("section-ar").classList.remove("hidden");
         document.getElementById("tab-ar").classList.add("active-ar");
         generateTimeSlots();
-        showArNotice(); // ar 팝업창 띄우는 함수에요
+        showArNotice();
     }
 }
 
@@ -293,9 +407,39 @@ function selectBtn(el, group) {
 function togglePurpose(el) {
     el.classList.toggle("active");
 }
+
 /* ==================== 팝업함수 ( AR) ==================== */
+
 function showArNotice() {
     document.getElementById("ar-notice-modal").classList.remove("hidden");
+
+    const btn = document.getElementById("arNoticeBtn");
+    const cover = document.getElementById("btnCover");
+    const text = document.getElementById("btnText");
+
+    btn.disabled = true;
+    btn.classList.add("cursor-not-allowed");
+
+    cover.style.transition = "none";
+    cover.style.width = "100%";
+    cover.offsetWidth;
+    cover.style.transition = "width 3s linear";
+    cover.style.width = "0%";
+
+    let sec = 3;
+    text.textContent = `확인했습니다 (${sec})`;
+
+    const timer = setInterval(() => {
+        sec--;
+        if (sec > 0) {
+            text.textContent = `확인했습니다 (${sec})`;
+        } else {
+            clearInterval(timer);
+            text.textContent = "확인했습니다 ✓";
+            btn.disabled = false;
+            btn.classList.remove("cursor-not-allowed");
+        }
+    }, 1000);
 }
 
 function closeArNotice() {
@@ -313,12 +457,11 @@ function changeArCount(delta) {
     const container = document.getElementById("ar-user-container");
 
     if (delta > 0) {
-       
         const div = document.createElement("div");
         div.className = "ar-user-card card-shadow animate-fadeIn";
         div.innerHTML = `
             <div class="flex flex-1 gap-3">
-                <div class="flex-1"><input type="text" placeholder="이름" class="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center text-base font-bold outline-none focus:border-indigo-400"></div>
+                <div class="flex-1"><input type="text" maxlength="10" placeholder="이름" class="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center text-base font-bold outline-none focus:border-indigo-400"></div>
                 <div class="flex bg-slate-100 p-1.5 rounded-2xl gap-1 w-32 shrink-0">
                     <button type="button" class="flex-1 py-2.5 bg-white rounded-xl text-sm font-bold shadow-sm" onclick="selectGender(this)">남</button>
                     <button type="button" class="flex-1 py-2.5 text-sm font-bold text-slate-400" onclick="selectGender(this)">여</button>
@@ -327,7 +470,7 @@ function changeArCount(delta) {
             <div class="flex gap-3 items-center">
                 <select class="flex-1 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm font-bold outline-none focus:border-indigo-400">
                     <option value="" disabled selected>나이 선택</option>
-                    ${AGE_GROUPS.map((age) => `<option>${age}</option>`).join("")}
+                    ${AGE_GROUPS.map((age) => `<option>${escapeHtml(age)}</option>`).join("")}
                 </select>
             </div>
         `;
@@ -335,7 +478,6 @@ function changeArCount(delta) {
         refreshIcons();
         div.querySelector("input")?.focus();
     } else if (delta < 0) {
-        
         if (container.lastElementChild) {
             container.lastElementChild.remove();
         }
@@ -344,6 +486,7 @@ function changeArCount(delta) {
     arCount = newCount;
     document.getElementById("ar-count-display").innerText = arCount;
 }
+
 function selectGender(btn) {
     const parent = btn.parentElement;
     parent.querySelectorAll("button").forEach((button) => {
@@ -364,7 +507,7 @@ function generateTimeSlots() {
     const day = now.getDay();
     const isWeekend = day === 0 || day === 6;
     const todayStr = formatLocalDate(now);
-    const reservedSlots = arLogs
+    const reservedSlots = arLogsToday
         .filter((log) => log.date === todayStr)
         .map((log) => log.timeSlot);
 
@@ -492,7 +635,7 @@ function renderStatsTable(data, categories, targetBodyId, targetFooterId, themeC
         let rowTotal = 0;
 
         const tr = document.createElement("tr");
-        tr.innerHTML = `<td class="category-row">${category}</td>`;
+        tr.innerHTML = `<td class="category-row">${escapeHtml(category)}</td>`;
 
         AGE_GROUPS.forEach((age, idx) => {
             const male = data[category][age]["남"];
@@ -541,26 +684,59 @@ function updateAdminDashboard() {
     const filteredVisitLogs = visitLogs.filter((log) => isDateInRange(log.date));
     const filteredArLogs = arLogs.filter((log) => isDateInRange(log.date));
 
-    const generalPurposes = PURPOSES.filter((purpose) => purpose !== "스터디룸");
+    /* ============================================================
+     * [수정] 메인 "이용 목적 및 연령별 통계" 테이블
+     *
+     * 기존: PURPOSES에서 스터디룸을 제외한 4개 카테고리만 집계
+     * 변경: PURPOSES 전체(스터디룸 포함 5개) + AR실 = 총 6개 카테고리
+     *
+     * - 휴식/독서/보드게임/탁구/스터디룸 → visitLogs에서 집계 (기존 로직 동일)
+     * - AR실 → arLogs에서 집계 (단독 AR 통계와 동일한 데이터 소스)
+     *
+     * 단독 스터디룸 테이블(study-stats-body)과
+     * 단독 AR 통계 테이블(ar-stats-body)은 아래에서 그대로 유지됨.
+     * ============================================================ */
 
+    // 메인 테이블 카테고리: PURPOSES 전체 + AR실
+    const mainCategories = [...PURPOSES, "AR실"];
+
+    // 메인 테이블 데이터 구조 초기화
     const vStats = {};
-    generalPurposes.forEach((purpose) => {
-        vStats[purpose] = {};
+    mainCategories.forEach((category) => {
+        vStats[category] = {};
         AGE_GROUPS.forEach((age) => {
-            vStats[purpose][age] = { 남: 0, 여: 0 };
+            vStats[category][age] = { 남: 0, 여: 0 };
         });
     });
 
+    // visitLogs → 휴식/독서/보드게임/탁구/스터디룸 집계
     filteredVisitLogs.forEach((log) => {
         (log.purposes || []).forEach((purpose) => {
-            if (generalPurposes.includes(purpose) && vStats[purpose] && vStats[purpose][log.age]) {
+            if (
+                PURPOSES.includes(purpose) &&
+                vStats[purpose] &&
+                vStats[purpose][log.age]
+            ) {
                 vStats[purpose][log.age][log.gender] += 1;
             }
         });
     });
 
-    renderStatsTable(vStats, generalPurposes, "visit-stats-body", "visit-stats-footer", "sum-col");
+    // arLogs → AR실 집계 (단독 AR 테이블과 동일한 데이터)
+    filteredArLogs.forEach((log) => {
+        (log.users || []).forEach((user) => {
+            if (vStats["AR실"][user.age]) {
+                vStats["AR실"][user.age][user.gender] += 1;
+            }
+        });
+    });
 
+    // 메인 테이블 렌더링
+    renderStatsTable(vStats, mainCategories, "visit-stats-body", "visit-stats-footer", "sum-col");
+
+    /* ============================================================
+     * 단독 스터디룸 테이블 — 변경 없음
+     * ============================================================ */
     const studyStats = { "스터디룸": {} };
     AGE_GROUPS.forEach((age) => {
         studyStats["스터디룸"][age] = { 남: 0, 여: 0 };
@@ -574,6 +750,9 @@ function updateAdminDashboard() {
 
     renderStatsTable(studyStats, ["스터디룸"], "study-stats-body", "study-stats-footer", "sum-col");
 
+    /* ============================================================
+     * 단독 AR 통계 테이블 — 변경 없음
+     * ============================================================ */
     const arStats = { "AR 이용": {} };
     AGE_GROUPS.forEach((age) => {
         arStats["AR 이용"][age] = { 남: 0, 여: 0 };
@@ -588,83 +767,86 @@ function updateAdminDashboard() {
     });
 
     renderStatsTable(arStats, ["AR 이용"], "ar-stats-body", "ar-stats-footer", "ar-sum-col");
-//여기 복붙
+
+    /* ============================================================
+     * 상세 방문 내역 테이블 — 변경 없음
+     * ============================================================ */
     const visitBody = document.getElementById("visit-log-body");
-visitBody.innerHTML = "";
+    visitBody.innerHTML = "";
 
-filteredVisitLogs.slice().reverse().forEach((log) => {
+    filteredVisitLogs.slice().reverse().forEach((log) => {
+        const tr = document.createElement("tr");
+        tr.className = "border-b hover:bg-slate-50";
 
-    const tr = document.createElement("tr");
-    tr.className = "border-b hover:bg-slate-50";
+        const purposesHtml = (log.purposes || []).map((purpose) =>
+            `<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-[10px] font-bold">${escapeHtml(purpose)}</span>`
+        ).join("");
 
-    tr.innerHTML = `
-        <td class="py-3 text-slate-500 font-bold text-xs">${log.date}</td>
-        <td class="text-slate-400 font-medium">${log.time}</td>
-        <td class="font-bold">${log.name}</td>
-        <td>${log.gender}</td>
-        <td>${log.age.split("(")[0]}</td>
+        tr.innerHTML = `
+            <td class="py-3 text-slate-500 font-bold text-xs">${escapeHtml(log.date)}</td>
+            <td class="text-slate-400 font-medium">${escapeHtml(log.time)}</td>
+            <td class="font-bold">${escapeHtml(log.name)}</td>
+            <td>${escapeHtml(log.gender)}</td>
+            <td>${escapeHtml((log.age || "").split("(")[0])}</td>
+            <td>
+                <div class="flex gap-1 justify-center">
+                    ${purposesHtml}
+                </div>
+            </td>
+            <td>
+                <button onclick="deleteVisitLog('${escapeHtml(log._key)}')"
+                    class="bg-red-500 text-white px-2 py-1 rounded text-xs">
+                    삭제
+                </button>
+            </td>
+        `;
 
-        <td>
-            <div class="flex gap-1 justify-center">
-                ${(log.purposes || []).map((purpose) =>
-                    `<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-[10px] font-bold">${purpose}</span>`
-                ).join("")}
-            </div>
-        </td>
+        visitBody.appendChild(tr);
+    });
 
-        <td>
-            <button onclick="deleteVisitLog('${log._key}')"
-                class="bg-red-500 text-white px-2 py-1 rounded text-xs">
-                삭제
-            </button>
-        </td>
-    `;
+    document.getElementById("visit-count-badge").innerText =
+        filteredVisitLogs.length + "건";
 
-    visitBody.appendChild(tr);
-});
+    /* ============================================================
+     * 상세 AR 예약 현황 테이블 — 변경 없음
+     * ============================================================ */
+    const arBody = document.getElementById("ar-log-body");
+    arBody.innerHTML = "";
 
-document.getElementById("visit-count-badge").innerText =
-    filteredVisitLogs.length + "건";
+    filteredArLogs.slice().reverse().forEach((log) => {
+        const tr = document.createElement("tr");
+        tr.className = "border-b hover:bg-indigo-50/30";
 
-const arBody = document.getElementById("ar-log-body");
-arBody.innerHTML = "";
+        const details = (log.users || [])
+            .map((user) =>
+                `<span class="inline-block bg-slate-100 rounded-lg px-2 py-1 mr-1 mb-1 text-slate-700 font-medium">
+                    ${escapeHtml(user.name)}
+                    <span class="text-[10px] text-slate-400 ml-1">
+                        (${escapeHtml(user.gender)}, ${escapeHtml((user.age || "").split("(")[0])})
+                    </span>
+                </span>`
+            )
+            .join("");
 
-filteredArLogs.slice().reverse().forEach((log) => {
+        tr.innerHTML = `
+            <td class="py-3 text-slate-500 font-bold text-xs">${escapeHtml(log.date)}</td>
+            <td class="py-3 text-indigo-600 font-bold">${escapeHtml(log.timeSlot)}</td>
+            <td class="font-bold">${escapeHtml(log.users?.[0]?.name || "")}</td>
+            <td>${log.users?.length || 0}명</td>
+            <td class="text-xs text-left px-4 py-2">${details}</td>
+            <td>
+                <button onclick="deleteArLog('${escapeHtml(log._key)}')"
+                    class="bg-red-500 text-white px-2 py-1 rounded text-xs">
+                    삭제
+                </button>
+            </td>
+        `;
 
-    const tr = document.createElement("tr");
-    tr.className = "border-b hover:bg-indigo-50/30";
+        arBody.appendChild(tr);
+    });
 
-    const details = (log.users || [])
-        .map((user) =>
-            `<span class="inline-block bg-slate-100 rounded-lg px-2 py-1 mr-1 mb-1 text-slate-700 font-medium">
-                ${user.name}
-                <span class="text-[10px] text-slate-400 ml-1">
-                    (${user.gender}, ${user.age.split("(")[0]})
-                </span>
-            </span>`
-        )
-        .join("");
-
-    tr.innerHTML = `
-        <td class="py-3 text-slate-500 font-bold text-xs">${log.date}</td>
-        <td class="py-3 text-indigo-600 font-bold">${log.timeSlot}</td>
-        <td class="font-bold">${log.users?.[0]?.name || ""}</td>
-        <td>${log.users?.length || 0}명</td>
-        <td class="text-xs text-left px-4 py-2">${details}</td>
-
-        <td>
-            <button onclick="deleteArLog('${log._key}')"
-                class="bg-red-500 text-white px-2 py-1 rounded text-xs">
-                삭제
-            </button>
-        </td>
-    `;
-
-    arBody.appendChild(tr);
-});
-
-document.getElementById("ar-count-badge").innerText =
-    filteredArLogs.length + "건";
+    document.getElementById("ar-count-badge").innerText =
+        filteredArLogs.length + "건";
 }
 
 /* ==================== 폼 제출 (Firebase 저장) ==================== */
@@ -673,50 +855,68 @@ function submitForm(type) {
     const now = new Date();
     const timeStr = `${now.getHours()}:${now.getMinutes().toString().padStart(2, "0")}`;
     const dateStr = formatLocalDate(now);
-    
-        if (type === "visit") {
-    const purposes = Array.from(document.querySelectorAll(".v-purpose.active")).map((purpose) => purpose.querySelector("span").innerText);
 
-    if (purposes.length === 0) {
-        showMessage("이용 목적을 선택해 주세요!");
-        return;
-    }
+    if (type === "visit") {
 
-    const users = Array.from(document.querySelectorAll("#visit-user-container .ar-user-card")).map((card) => {
-        const genderBtn = Array.from(card.querySelectorAll("button")).find((button) => button.classList.contains("bg-white"));
-        return {
-            name: card.querySelector("input").value.trim(),
-            gender: genderBtn ? genderBtn.innerText.trim() : "남",
-            age: card.querySelector("select").value
-        };
-    });
+        if (isSubmittingVisit) return;
 
-    if (users.length === 0 || users.some((user) => !user.name || !user.age)) {
-        showMessage("모든 방문자 정보를 입력해 주세요!");
-        return;
-    }
+        const purposes = Array.from(document.querySelectorAll(".v-purpose.active")).map((purpose) => purpose.querySelector("span").innerText);
 
-    const savePromises = users.map((user) => {
-        const logData = { date: dateStr, time: timeStr, name: user.name, gender: user.gender, age: user.age, purposes };
-        return saveVisitLog(logData);
-    });
+        if (purposes.length === 0) {
+            showMessage("이용 목적을 선택해 주세요!");
+            return;
+        }
 
-    Promise.all(savePromises)
-        .then(() => {
-            alert(`${users.length}명 방문 등록이 완료되었습니다!`);
-            visitCount = 1;
-            document.getElementById("v-count-display").innerText = "1";
-            document.getElementById("v-count-minus").classList.add("opacity-40", "cursor-not-allowed");
-            document.getElementById("visit-user-container").innerHTML = "";
-            document.getElementById("visit-user-container").classList.add("hidden");
-            document.getElementById("v-form-bottom").classList.add("hidden");
-            document.querySelectorAll(".v-purpose").forEach((button) => button.classList.remove("active"));
-        })
-        .catch((err) => {
-            alert("저장 중 오류가 발생했습니다: " + err.message);
+        const users = Array.from(document.querySelectorAll("#visit-user-container .ar-user-card")).map((card) => {
+            const genderBtn = Array.from(card.querySelectorAll("button")).find((button) => button.classList.contains("bg-white"));
+            return {
+                name: card.querySelector("input").value.trim(),
+                gender: genderBtn ? genderBtn.innerText.trim() : "남",
+                age: card.querySelector("select").value
+            };
         });
-//여기까지 
+
+        if (users.length === 0 || users.some((user) => !user.name || !user.age)) {
+            showMessage("모든 방문자 정보를 입력해 주세요!");
+            return;
+        }
+
+        const invalidUser = users.find((user) => !isValidName(user.name) || !isValidGender(user.gender) || !isValidAge(user.age));
+        if (invalidUser) {
+            showMessage("이름은 한글/영문/숫자 10자 이내로 입력해 주세요!");
+            return;
+        }
+
+        isSubmittingVisit = true;
+        const visitSubmitBtn = document.querySelector("#section-visit .submit-btn");
+        if (visitSubmitBtn) visitSubmitBtn.disabled = true;
+
+        const savePromises = users.map((user) => {
+            const logData = { date: dateStr, time: timeStr, name: user.name, gender: user.gender, age: user.age, purposes };
+            return saveVisitLog(logData);
+        });
+
+        Promise.all(savePromises)
+            .then(() => {
+                showMessage(`${users.length}명 방문 등록이 완료되었습니다! ✓`, "success");
+                document.getElementById("visit-user-container").innerHTML = "";
+                document.querySelectorAll(".v-purpose").forEach((button) => button.classList.remove("active"));
+                visitCount = 0;
+                changeVisitCount(1);
+            })
+            .catch((err) => {
+                logError("submitForm-visit", err);
+                showMessage("저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+            })
+            .finally(() => {
+                isSubmittingVisit = false;
+                if (visitSubmitBtn) visitSubmitBtn.disabled = false;
+            });
+
     } else {
+
+        if (isSubmittingAr) return;
+
         const timeSlot = document.querySelector(".time-slot-btn.active")?.querySelector("span")?.innerText;
 
         if (!timeSlot) {
@@ -724,7 +924,7 @@ function submitForm(type) {
             return;
         }
 
-        const users = Array.from(document.querySelectorAll(".ar-user-card")).map((card) => {
+        const users = Array.from(document.querySelectorAll("#ar-user-container .ar-user-card")).map((card) => {
             const genderBtn = Array.from(card.querySelectorAll("button")).find((button) => button.classList.contains("bg-white"));
             return {
                 name: card.querySelector("input").value.trim(),
@@ -738,26 +938,44 @@ function submitForm(type) {
             return;
         }
 
+        const invalidUser = users.find((user) => !isValidName(user.name) || !isValidGender(user.gender) || !isValidAge(user.age));
+        if (invalidUser) {
+            showMessage("이름은 한글/영문/숫자 10자 이내로 입력해 주세요!");
+            return;
+        }
+
         const logData = { date: dateStr, timeSlot, users };
 
-        // ✅ Firebase에 저장
-        saveArLog(logData)
+        isSubmittingAr = true;
+        const arSubmitBtn = document.querySelector("#section-ar .submit-btn");
+        if (arSubmitBtn) arSubmitBtn.disabled = true;
+
+        reserveSlotAndSaveArLog(dateStr, timeSlot, logData)
             .then(() => {
-                alert("AR 예약이 신청되었습니다!");
+                showMessage("AR 예약이 완료되었습니다! ✓", "success");
                 document.getElementById("ar-user-container").innerHTML = "";
                 document.querySelectorAll(".time-slot-btn").forEach((button) => {
                     button.classList.remove("active");
                 });
-              arCount = 0;
+                arCount = 0;
                 document.getElementById("ar-user-container").innerHTML = "";
                 document.getElementById("ar-count-display").innerText = "0";
-            changeArCount(1);
-        generateTimeSlots();
-        switchTab("visit");
-                
+                changeArCount(1);
+                generateTimeSlots();
+                switchTab("visit");
             })
             .catch((err) => {
-                alert("저장 중 오류가 발생했습니다: " + err.message);
+                logError("submitForm-ar", err);
+                if (err && err.code === "SLOT_TAKEN") {
+                    showMessage("방금 다른 이용자가 같은 시간을 먼저 예약했습니다. 다른 시간을 선택해 주세요.");
+                    generateTimeSlots();
+                } else {
+                    showMessage("저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
+                }
+            })
+            .finally(() => {
+                isSubmittingAr = false;
+                if (arSubmitBtn) arSubmitBtn.disabled = false;
             });
     }
 }
@@ -771,24 +989,24 @@ function exportToExcel(type) {
     if (type === "visit") {
         const filtered = visitLogs.filter((log) => isDateInRange(log.date));
         if (filtered.length === 0) {
-            alert("데이터가 없습니다.");
+            showMessage("다운로드할 데이터가 없습니다.", "info");
             return;
         }
         csvContent += "날짜,시간,이름,성별,나이,이용목적\n";
         filtered.forEach((log) => {
-            csvContent += `${log.date},${log.time},${log.name},${log.gender},${log.age.split("(")[0]},"${(log.purposes || []).join(", ")}"\n`;
+            csvContent += `${sanitizeCsvField(log.date)},${sanitizeCsvField(log.time)},${sanitizeCsvField(log.name)},${sanitizeCsvField(log.gender)},${sanitizeCsvField((log.age || "").split("(")[0])},"${sanitizeCsvField((log.purposes || []).join(", "))}"\n`;
         });
         fileName = `방문등록_${formatLocalDate(new Date())}.csv`;
     } else {
         const filtered = arLogs.filter((log) => isDateInRange(log.date));
         if (filtered.length === 0) {
-            alert("데이터가 없습니다.");
+            showMessage("다운로드할 데이터가 없습니다.", "info");
             return;
         }
         csvContent += "예약날짜,예약시간,대표자,총인원,이용자상세\n";
         filtered.forEach((log) => {
-            const details = (log.users || []).map((user) => `${user.name}(${user.gender}/${user.age.split("(")[0]})`).join(" | ");
-            csvContent += `${log.date},${log.timeSlot},${log.users?.[0]?.name || ""},${log.users?.length || 0},"${details}"\n`;
+            const details = (log.users || []).map((user) => `${user.name}(${user.gender}/${(user.age || "").split("(")[0]})`).join(" | ");
+            csvContent += `${sanitizeCsvField(log.date)},${sanitizeCsvField(log.timeSlot)},${sanitizeCsvField(log.users?.[0]?.name || "")},${log.users?.length || 0},"${sanitizeCsvField(details)}"\n`;
         });
         fileName = `AR예약_${formatLocalDate(new Date())}.csv`;
     }
@@ -820,31 +1038,23 @@ function initFilterOptions() {
 
     monthSelect.value = now.getMonth();
 }
+
 /* ==================== 방문 등록 인원수 ==================== */
 
-let visitCount = 1;
+let visitCount = 0;
 
 function changeVisitCount(delta) {
-    visitCount = Math.max(1, visitCount + delta);
-    document.getElementById("v-count-display").innerText = visitCount;
-    const minusBtn = document.getElementById("v-count-minus");
-    if (visitCount === 1) {
-        minusBtn.classList.add("opacity-40", "cursor-not-allowed");
-    } else {
-        minusBtn.classList.remove("opacity-40", "cursor-not-allowed");
-    }
-}
+    const newCount = visitCount + delta;
+    if (newCount < 1) return;
 
-function confirmVisitCount() {
     const container = document.getElementById("visit-user-container");
-    const bottom = document.getElementById("v-form-bottom");
-    container.innerHTML = "";
-    for (let i = 0; i < visitCount; i++) {
+
+    if (delta > 0) {
         const div = document.createElement("div");
         div.className = "ar-user-card card-shadow animate-fadeIn";
         div.innerHTML = `
             <div class="flex flex-1 gap-3">
-                <div class="flex-1"><input type="text" maxlength="4" placeholder="이름" class="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center text-base font-bold outline-none focus:border-blue-400"></div>
+                <div class="flex-1"><input type="text" maxlength="10" placeholder="이름" class="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center text-base font-bold outline-none focus:border-blue-400"></div>
                 <div class="flex bg-slate-100 p-1.5 rounded-2xl gap-1 w-32 shrink-0">
                     <button type="button" class="flex-1 py-2.5 bg-white rounded-xl text-sm font-bold shadow-sm" onclick="selectGender(this)">남</button>
                     <button type="button" class="flex-1 py-2.5 text-sm font-bold text-slate-400" onclick="selectGender(this)">여</button>
@@ -853,19 +1063,30 @@ function confirmVisitCount() {
             <div class="flex gap-3 items-center">
                 <select class="flex-1 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm font-bold outline-none focus:border-blue-400">
                     <option value="" disabled selected>나이 선택</option>
-                    ${AGE_GROUPS.map((age) => `<option>${age}</option>`).join("")}
+                    ${AGE_GROUPS.map((age) => `<option>${escapeHtml(age)}</option>`).join("")}
                 </select>
             </div>
         `;
         container.appendChild(div);
+        refreshIcons();
+        div.querySelector("input")?.focus();
+    } else if (delta < 0) {
+        if (container.lastElementChild) {
+            container.lastElementChild.remove();
+        }
     }
-    container.classList.remove("hidden");
-    bottom.classList.remove("hidden");
-    refreshIcons();
-    setTimeout(() => {
-        container.querySelector("input")?.focus();
-    }, 100);
+
+    visitCount = newCount;
+    document.getElementById("v-count-display").innerText = visitCount;
+
+    const minusBtn = document.getElementById("v-count-minus");
+    if (visitCount === 1) {
+        minusBtn.classList.add("opacity-40", "cursor-not-allowed");
+    } else {
+        minusBtn.classList.remove("opacity-40", "cursor-not-allowed");
+    }
 }
+
 /* ==================== 페이지 초기화 ==================== */
 
 function initializePage() {
@@ -876,9 +1097,14 @@ function initializePage() {
 
     initFilterOptions();
     changeArCount(1);
-    initFirebaseListeners(); // ✅ Firebase 데이터 구독 시작
+    changeVisitCount(1);
     refreshIcons();
 
+    auth.signInAnonymously()
+        .catch((e) => logError("anon-auth", e))
+        .finally(() => {
+            subscribeArLogsToday();
+        });
 }
 
 document.addEventListener("DOMContentLoaded", initializePage);

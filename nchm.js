@@ -137,6 +137,19 @@ function subscribeArLogsToday() {
     });
 }
 
+function subscribeVisitLogs() {
+    visitLogsRef.off();
+    visitLogsRef.on("value", (snapshot) => {
+        visitLogs = [];
+        snapshot.forEach((child) => {
+            visitLogs.push({ _key: child.key, ...child.val() });
+        });
+        updateAdminDashboard();
+    }, (error) => {
+        logError("visitLogsRef.on(all)", error);
+    });
+}
+
 function subscribeArLogsAll() {
     if (arLogsTodayQuery) {
         arLogsTodayQuery.off();
@@ -294,11 +307,7 @@ async function verifyAdminPassword() {
         }, 500);
 
     } catch (e) {
-    console.error(e.code);
-    console.error(e.message);
-
-    showMessage(e.code);
-}
+        logError("verifyAdminPassword", e);
 
         adminLoginFailCount += 1;
         if (adminLoginFailCount >= ADMIN_LOGIN_MAX_ATTEMPTS) {
@@ -341,6 +350,17 @@ function exitAdmin() {
         .catch((e) => logError("exitAdmin-reauth", e));
 
     switchTab("visit");
+}
+
+function deleteVisitLog(key) {
+    visitLogsRef.child(key).remove()
+        .then(() => {
+            showMessage("삭제되었습니다.", "info");
+        })
+        .catch((err) => {
+            logError("deleteVisitLog", err);
+            showMessage("삭제 중 오류가 발생했습니다.");
+        });
 }
 
 function deleteArLog(key) {

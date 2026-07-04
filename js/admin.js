@@ -18,7 +18,7 @@ function openPasswordModal() {
 function closePasswordModal() {
     dom.passwordModal.classList.add("hidden");
 }
-
+//..
 function updateAdminLoginButtonState() {
     const btn = dom.adminVerifyBtn;
     if (!btn) return;

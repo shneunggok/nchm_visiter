@@ -294,7 +294,11 @@ async function verifyAdminPassword() {
         }, 500);
 
     } catch (e) {
-        logError("verifyAdminPassword", e);
+    console.error(e.code);
+    console.error(e.message);
+
+    showMessage(e.code);
+}
 
         adminLoginFailCount += 1;
         if (adminLoginFailCount >= ADMIN_LOGIN_MAX_ATTEMPTS) {

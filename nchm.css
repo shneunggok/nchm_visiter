@@ -135,7 +135,7 @@ body.theme-admin { background-color: #f8fafc; }
     left: 50%;
     transform: translateX(-50%);
     z-index: 1000;
-    background-color: #ef4444; /* 빨간색 배경 */
+    background-color: #22C55E; /* 빨간색 배경 */
     color: white;
     padding: 12px 24px;
     border-radius: 12px;

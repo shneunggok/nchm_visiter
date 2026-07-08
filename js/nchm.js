@@ -341,7 +341,7 @@ function updateAdminDashboard() {
 
     const filteredVisitLogs = visitLogs.filter((log) => isDateInRange(log.date));
     const filteredArLogs = arLogs.filter((log) => isDateInRange(log.date));
-    //const mainCategories = [...PURPOSES, "AR실"];
+    const mainCategories = [...PURPOSES];
 
     const vStats = {};
     mainCategories.forEach((category) => {

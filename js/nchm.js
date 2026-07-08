@@ -341,7 +341,7 @@ function updateAdminDashboard() {
 
     const filteredVisitLogs = visitLogs.filter((log) => isDateInRange(log.date));
     const filteredArLogs = arLogs.filter((log) => isDateInRange(log.date));
-    const mainCategories = [...PURPOSES, "AR실"];
+    //const mainCategories = [...PURPOSES, "AR실"];
 
     const vStats = {};
     mainCategories.forEach((category) => {
@@ -359,13 +359,13 @@ function updateAdminDashboard() {
         });
     });
 
-    filteredArLogs.forEach((log) => {
-        (log.users || []).forEach((user) => {
-            if (vStats["AR실"][user.age]) {
-                vStats["AR실"][user.age][user.gender] += 1;
-            }
-        });
-    });
+    //filteredArLogs.forEach((log) => {
+      //  (log.users || []).forEach((user) => {
+        //    if (vStats["AR실"][user.age]) {
+          //      vStats["AR실"][user.age][user.gender] += 1;
+            //}
+       // });
+    //});
 
     renderStatsTable(vStats, mainCategories, "visit-stats-body", "visit-stats-footer", "sum-col");
 

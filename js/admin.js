@@ -46,6 +46,9 @@ async function verifyAdminPassword() {
 
     try {
         const credential = await auth.signInWithEmailAndPassword(ADMIN_EMAIL, password);
+        // Force the newly authenticated administrator token into the Firebase
+        // client before opening admin-only tools such as TV settings.
+        await credential.user.getIdToken(true);
         const tokenResult = await credential.user.getIdTokenResult();
         if (tokenResult.claims.email !== ADMIN_EMAIL) {
             await auth.signOut();
@@ -141,4 +144,31 @@ function initializeAdminActivityWatchers() {
     document.addEventListener("click", handler);
     document.addEventListener("keydown", handler);
     document.addEventListener("mousemove", handler);
+}
+
+
+function loadTvSettings() {
+    db.ref("tvSettings").once("value").then((snapshot) => {
+        const settings = snapshot.val() || {};
+        const display = settings.display || {};
+        document.querySelectorAll("#tv-display-options [data-tv-key]").forEach((input) => {
+            input.checked = display[input.dataset.tvKey] !== false;
+        });
+        if (settings.slideInterval) document.getElementById("tv-slide-interval").value = String(settings.slideInterval);
+    }).catch((error) => logError("loadTvSettings", error));
+}
+
+function saveTvSettings() {
+    const display = {};
+    document.querySelectorAll("#tv-display-options [data-tv-key]").forEach((input) => {
+        display[input.dataset.tvKey] = input.checked;
+    });
+    const slideInterval = Number(document.getElementById("tv-slide-interval").value);
+    db.ref("tvSettings").set({ display, slideInterval })
+        .then(() => showMessage("TV 설정이 저장되었습니다.", "success"))
+        .catch((error) => { logError("saveTvSettings", error); showMessage("TV 설정 저장 중 오류가 발생했습니다."); });
+}
+
+function openTvPreview() {
+    window.open("./tv.html", "nchm-tv-preview", "noopener");
 }

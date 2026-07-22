@@ -59,6 +59,7 @@
         
         <!-- AR 예약 현황 탭 -->
         <button onclick="switchAdminSubTab('ar-logs')" id="subtab-ar-logs" class="tab-btn font-bold">AR 예약 현황</button>
+        <button onclick="switchAdminSubTab('tv-settings')" id="subtab-tv-settings" class="tab-btn font-bold">TV 관리</button>
     </div>
 
     <!-- ==================== 메인 콘텐츠 컨테이너 ==================== -->
@@ -245,6 +246,8 @@
                     </table>
                 </div>
             </div>
+
+            <div id="admin-tv-settings" class="hidden space-y-6"></div>
         </div>
     </div>
 
@@ -303,6 +306,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
     <!-- 분리한 JavaScript 파일 연결 -->
     <script src="./js/config.js"></script>
     <script src="./js/firebase.js"></script>
@@ -310,6 +314,7 @@
     <script src="./js/visit.js"></script>
     <script src="./js/ar.js"></script>
     <script src="./js/admin.js"></script>
+    <script src="./js/tv-admin.js"></script>
     <script src="./js/nchm.js"></script>
 </body>
 </html>

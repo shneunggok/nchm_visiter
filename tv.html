@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NCHM TV - 시흥시능곡청소년문화의집</title>
+
+    <!-- Tailwind CSS (minimal for utility classes) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@0.469.0"></script>
+
+    <!-- TV-specific styles -->
+    <link rel="stylesheet" href="./tv.css">
+</head>
+<body>
+    <!-- ==================== TV MAIN DISPLAY ==================== -->
+    <div id="tv-container" class="tv-container">
+        
+        <!-- Background overlay for visual effect -->
+        <div class="tv-bg-overlay"></div>
+
+        <!-- ==================== SLIDE: Welcome / Title Screen ==================== -->
+        <div id="slide-welcome" class="tv-slide active-slide">
+            <div class="tv-slide-content">
+                <div class="tv-logo-area">
+                    <img src="https://i.ibb.co/Dg5H6WL3/3.png" alt="시흥시능곡청소년문화의집" class="tv-logo">
+                </div>
+                <h1 class="tv-title">시흥시능곡청소년문화의집</h1>
+                <p class="tv-subtitle">청소년의 꿈이 자라는 공간</p>
+                <div class="tv-clock-area">
+                    <div id="tv-clock" class="tv-clock">--:--:--</div>
+                    <div id="tv-date-display" class="tv-date">----년 --월 --일 ---요일</div>
+                </div>
+                <div class="tv-status-bar">
+                    <span id="tv-connection-status" class="tv-status-dot status-connecting"></span>
+                    <span id="tv-status-text" class="tv-status-text">연결 중...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== SLIDE: Today's Visitors ==================== -->
+        <div id="slide-visitors" class="tv-slide">
+            <div class="tv-slide-content">
+                <div class="tv-section-icon">
+                    <i data-lucide="users" class="w-16 h-16"></i>
+                </div>
+                <h2 class="tv-section-title">오늘의 방문자</h2>
+                <div class="tv-visitor-count-area">
+                    <span id="tv-today-count" class="tv-visitor-count">0</span>
+                    <span class="tv-visitor-unit">명</span>
+                </div>
+                <p class="tv-section-desc">오늘 시설을 방문해주셨습니다</p>
+            </div>
+        </div>
+
+        <!-- ==================== SLIDE: Attendance Ranking ==================== -->
+        <div id="slide-ranking" class="tv-slide">
+            <div class="tv-slide-content">
+                <div class="tv-section-icon">
+                    <i data-lucide="trophy" class="w-16 h-16"></i>
+                </div>
+                <h2 class="tv-section-title">이달의 출석왕</h2>
+                <div id="tv-ranking-list" class="tv-ranking-list">
+                    <div class="tv-ranking-empty">데이터를 불러오는 중...</div>
+                </div>
+                <p class="tv-section-desc">매월 1일 초기화됩니다</p>
+            </div>
+        </div>
+
+        <!-- ==================== SLIDE: AR Status ==================== -->
+        <div id="slide-ar" class="tv-slide">
+            <div class="tv-slide-content">
+                <div class="tv-section-icon">
+                    <i data-lucide="glasses" class="w-16 h-16"></i>
+                </div>
+                <h2 class="tv-section-title">AR 체험 현황</h2>
+                <div class="tv-ar-status-area">
+                    <div class="tv-ar-info-box">
+                        <span class="tv-ar-label">현재 예약</span>
+                        <span id="tv-ar-count" class="tv-ar-count">0</span>
+                        <span class="tv-ar-unit">팀</span>
+                    </div>
+                    <div class="tv-ar-info-box">
+                        <span class="tv-ar-label">운영 상태</span>
+                        <span id="tv-ar-status" class="tv-ar-status-badge status-active">운영 중</span>
+                    </div>
+                </div>
+                <p class="tv-section-desc">실시간 AR 예약 현황입니다</p>
+            </div>
+        </div>
+
+        <!-- ==================== SLIDE: Events ==================== -->
+        <div id="slide-events" class="tv-slide">
+            <div class="tv-slide-content">
+                <div class="tv-section-icon">
+                    <i data-lucide="calendar" class="w-16 h-16"></i>
+                </div>
+                <h2 class="tv-section-title">진행 중인 이벤트</h2>
+                <div id="tv-events-container" class="tv-events-container">
+                    <div class="tv-events-empty">현재 진행 중인 이벤트가 없습니다</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== SLIDE: Photos ==================== -->
+        <div id="slide-photos" class="tv-slide">
+            <div class="tv-slide-content">
+                <div class="tv-section-icon">
+                    <i data-lucide="image" class="w-16 h-16"></i>
+                </div>
+                <h2 class="tv-section-title">갤러리</h2>
+                <div id="tv-photo-container" class="tv-photo-container">
+                    <div class="tv-photo-empty">사진을 불러오는 중...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== SLIDE: Notices ==================== -->
+        <div id="slide-notices" class="tv-slide">
+            <div class="tv-slide-content">
+                <div class="tv-section-icon">
+                    <i data-lucide="megaphone" class="w-16 h-16"></i>
+                </div>
+                <h2 class="tv-section-title">공지사항</h2>
+                <div id="tv-notices-container" class="tv-notices-container">
+                    <div class="tv-notices-empty">공지사항이 없습니다</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ==================== SLIDE INDICATOR DOTS ==================== -->
+    <div id="tv-indicator" class="tv-indicator">
+        <span class="tv-dot active-dot" data-slide="welcome"></span>
+        <span class="tv-dot" data-slide="visitors"></span>
+        <span class="tv-dot" data-slide="ranking"></span>
+        <span class="tv-dot" data-slide="ar"></span>
+        <span class="tv-dot" data-slide="events"></span>
+        <span class="tv-dot" data-slide="photos"></span>
+        <span class="tv-dot" data-slide="notices"></span>
+    </div>
+    <div id="tv-preview-controls" class="tv-preview-controls hidden">
+        <button type="button" data-tv-preview="previous">‹</button>
+        <button type="button" data-tv-preview="pause">일시정지</button>
+        <button type="button" data-tv-preview="next">›</button>
+        <button type="button" data-tv-preview="restart">처음부터</button>
+        <button type="button" data-tv-preview="fullscreen">전체 화면</button>
+    </div>
+
+    <!-- ==================== Firebase SDK ==================== -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+
+    <!-- ==================== Shared Project Files ==================== -->
+    <script src="./js/config.js"></script>
+    <script src="./js/firebase.js"></script>
+    <script src="./js/utils.js"></script>
+
+    <!-- ==================== TV Module ==================== -->
+    <script src="./js/tv.js"></script>
+</body>
+</html>

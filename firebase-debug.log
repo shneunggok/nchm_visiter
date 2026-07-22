@@ -1,0 +1,22 @@
+[debug] [2026-07-18T05:36:08.298Z] ----------------------------------------------------------------------
+[debug] [2026-07-18T05:36:08.300Z] Command:       /usr/local/bin/node /Users/choewonhyeog/.npm/_npx/7750544ccf494d8b/node_modules/.bin/firebase projects:list
+[debug] [2026-07-18T05:36:08.300Z] CLI Version:   15.24.0
+[debug] [2026-07-18T05:36:08.300Z] Platform:      darwin
+[debug] [2026-07-18T05:36:08.300Z] Node Version:  v24.14.0
+[debug] [2026-07-18T05:36:08.300Z] Detected Agent: codex_cli
+[debug] [2026-07-18T05:36:08.301Z] Time:          Sat Jul 18 2026 14:36:08 GMT+0900 (Korean Standard Time)
+[debug] [2026-07-18T05:36:08.301Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-07-18T05:36:08.306Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-07-18T05:36:08.314Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-07-18T05:36:08.338Z] Error: Could not load the default credentials. Browse to https://cloud.google.com/docs/authentication/getting-started for more information.
+    at GoogleAuth.getApplicationDefaultAsync (/Users/choewonhyeog/.npm/_npx/7750544ccf494d8b/node_modules/google-auth-library/build/src/auth/googleauth.js:287:15)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GoogleAuth._GoogleAuth_determineClient (/Users/choewonhyeog/.npm/_npx/7750544ccf494d8b/node_modules/google-auth-library/build/src/auth/googleauth.js:834:32)
+    at async GoogleAuth.getClient (/Users/choewonhyeog/.npm/_npx/7750544ccf494d8b/node_modules/google-auth-library/build/src/auth/googleauth.js:698:20)
+    at async GoogleAuth.getAccessToken (/Users/choewonhyeog/.npm/_npx/7750544ccf494d8b/node_modules/google-auth-library/build/src/auth/googleauth.js:722:24)
+    at async autoAuth (/Users/choewonhyeog/.npm/_npx/7750544ccf494d8b/node_modules/firebase-tools/lib/requireAuth.js:38:19)
+    at async Object.requireAuth [as fn] (/Users/choewonhyeog/.npm/_npx/7750544ccf494d8b/node_modules/firebase-tools/lib/requireAuth.js:100:20)
+    at async /Users/choewonhyeog/.npm/_npx/7750544ccf494d8b/node_modules/firebase-tools/lib/command.js:271:17
+[error] 
+[error] Error: Failed to authenticate, have you run firebase login?

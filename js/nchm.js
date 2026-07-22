@@ -63,15 +63,21 @@ function switchTab(type) {
 function switchAdminSubTab(tab) {
     dom.adminVisitLogs.classList.add("hidden");
     dom.adminArLogs.classList.add("hidden");
+    document.getElementById("admin-tv-settings").classList.add("hidden");
     document.getElementById("subtab-visit-logs").classList.remove("active-visit");
     document.getElementById("subtab-ar-logs").classList.remove("active-ar");
+    document.getElementById("subtab-tv-settings").classList.remove("active-ar");
 
     if (tab === "visit-logs") {
         dom.adminVisitLogs.classList.remove("hidden");
         document.getElementById("subtab-visit-logs").classList.add("active-visit");
-    } else {
+    } else if (tab === "ar-logs") {
         dom.adminArLogs.classList.remove("hidden");
         document.getElementById("subtab-ar-logs").classList.add("active-ar");
+    } else {
+        document.getElementById("admin-tv-settings").classList.remove("hidden");
+        document.getElementById("subtab-tv-settings").classList.add("active-ar");
+        loadTvSettings();
     }
 }
 
@@ -175,6 +181,7 @@ function addTimeBtn(container, h, m, reservedSlots) {
     const endM = m === "30" ? "00" : "30";
     const endTimeStr = `${endH.toString().padStart(2, "0")}:${endM}`;
 
+    
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = `time-slot-btn choice-btn p-4 rounded-2xl flex flex-col items-center ${isReserved ? "disabled" : ""}`;

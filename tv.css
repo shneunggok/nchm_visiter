@@ -1,0 +1,533 @@
+/* ============================================================================
+ * tv.css
+ * TV Display System - Full-screen slideshow for NCHM youth center
+ * ============================================================================
+ * Designed for 1920x1080 TV display. Dark background, large fonts,
+ * smooth transitions between slides.
+ * ============================================================================
+ */
+
+/* ==================== Reset & Base ==================== */
+*, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0f172a;
+    color: #ffffff;
+}
+
+.tv-preview-controls { position: fixed; right: 20px; bottom: 20px; z-index: 20; display: flex; gap: 8px; }
+.tv-preview-controls button { border: 0; border-radius: 10px; padding: 10px 14px; background: rgba(15,23,42,.86); color: white; font-weight: 700; cursor: pointer; }
+.tv-preview-controls button:hover { background: #4f46e5; }
+[data-tv-theme="light"] { background: #f8fafc; color: #0f172a; }
+[data-tv-theme="blue"] .tv-bg-overlay { background-color: #0b3b82; }
+
+/* ==================== TV Container ==================== */
+.tv-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Animated gradient background overlay */
+.tv-bg-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #0f172a 50%, #1a1f35 75%, #0f172a 100%);
+    background-size: 400% 400%;
+    animation: gradientShift 15s ease infinite;
+    z-index: 0;
+}
+
+@keyframes gradientShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+/* ==================== Slide System ==================== */
+.tv-slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.8s ease, transform 0.8s ease;
+    transform: scale(0.95);
+    z-index: 1;
+    pointer-events: none;
+}
+
+.tv-slide.active-slide {
+    opacity: 1;
+    transform: scale(1);
+    z-index: 2;
+    pointer-events: auto;
+}
+
+.tv-slide-content {
+    text-align: center;
+    padding: 40px;
+    max-width: 90%;
+    max-height: 90%;
+    z-index: 3;
+    position: relative;
+}
+
+/* ==================== Welcome Slide ==================== */
+.tv-logo-area {
+    margin-bottom: 24px;
+}
+
+.tv-logo {
+    height: 120px;
+    width: auto;
+    filter: brightness(0) invert(1); /* Make logo white for dark bg */
+    opacity: 0.9;
+}
+
+.tv-title {
+    font-size: 3.5rem;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 16px;
+    line-height: 1.2;
+}
+
+.tv-subtitle {
+    font-size: 1.5rem;
+    color: #94a3b8;
+    font-weight: 500;
+    margin-bottom: 48px;
+}
+
+.tv-clock-area {
+    margin-bottom: 32px;
+}
+
+.tv-clock {
+    font-size: 6rem;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    color: #e2e8f0;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    margin-bottom: 8px;
+    text-shadow: 0 0 40px rgba(96, 165, 250, 0.3);
+}
+
+.tv-date {
+    font-size: 1.5rem;
+    color: #64748b;
+    font-weight: 500;
+}
+
+/* ==================== Connection Status ==================== */
+.tv-status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 24px;
+}
+
+.tv-status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.status-connecting {
+    background: #f59e0b;
+    animation: pulse 1s ease infinite;
+}
+
+.status-connected {
+    background: #22c55e;
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+}
+
+.status-error {
+    background: #ef4444;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.tv-status-text {
+    font-size: 1rem;
+    color: #64748b;
+    font-weight: 500;
+}
+
+/* ==================== Section Icon ==================== */
+.tv-section-icon {
+    margin-bottom: 24px;
+    color: #60a5fa;
+    opacity: 0.8;
+}
+
+/* ==================== Section Title ==================== */
+.tv-section-title {
+    font-size: 3rem;
+    font-weight: 900;
+    color: #f1f5f9;
+    margin-bottom: 32px;
+    letter-spacing: -0.01em;
+}
+
+/* ==================== Section Description ==================== */
+.tv-section-desc {
+    font-size: 1.2rem;
+    color: #64748b;
+    margin-top: 24px;
+    font-weight: 400;
+}
+
+/* ==================== Today's Visitors Slide ==================== */
+.tv-visitor-count-area {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.tv-visitor-count {
+    font-size: 10rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1;
+    letter-spacing: -0.02em;
+}
+
+.tv-visitor-unit {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #94a3b8;
+}
+
+/* ==================== Ranking Slide ==================== */
+.tv-ranking-list {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    min-width: 400px;
+}
+
+.tv-ranking-empty {
+    font-size: 1.5rem;
+    color: #64748b;
+    padding: 40px;
+}
+
+.tv-ranking-item {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 20px 32px;
+    width: 100%;
+    max-width: 600px;
+    animation: rankSlideIn 0.5s ease forwards;
+    opacity: 0;
+    transform: translateX(-20px);
+}
+
+@keyframes rankSlideIn {
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.tv-ranking-item:nth-child(1) { animation-delay: 0.1s; }
+.tv-ranking-item:nth-child(2) { animation-delay: 0.2s; }
+.tv-ranking-item:nth-child(3) { animation-delay: 0.3s; }
+.tv-ranking-item:nth-child(4) { animation-delay: 0.4s; }
+.tv-ranking-item:nth-child(5) { animation-delay: 0.5s; }
+
+.tv-rank-num {
+    font-size: 2rem;
+    font-weight: 900;
+    min-width: 60px;
+    text-align: center;
+}
+
+.tv-rank-1 { color: #fbbf24; text-shadow: 0 0 20px rgba(251, 191, 36, 0.4); }
+.tv-rank-2 { color: #94a3b8; }
+.tv-rank-3 { color: #d97706; }
+.tv-rank-other { color: #64748b; }
+
+.tv-rank-name {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    flex: 1;
+    text-align: left;
+}
+
+.tv-rank-count {
+    font-size: 1.8rem;
+    font-weight: 900;
+    color: #60a5fa;
+}
+
+.tv-rank-label {
+    font-size: 1rem;
+    color: #64748b;
+    font-weight: 500;
+}
+
+/* ==================== AR Status Slide ==================== */
+.tv-ar-status-area {
+    display: flex;
+    gap: 40px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.tv-ar-info-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 24px;
+    padding: 32px 48px;
+    min-width: 250px;
+}
+
+.tv-ar-label {
+    font-size: 1.2rem;
+    color: #94a3b8;
+    font-weight: 600;
+}
+
+.tv-ar-count {
+    font-size: 5rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, #a78bfa, #6366f1);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1;
+}
+
+.tv-ar-unit {
+    font-size: 1.5rem;
+    color: #94a3b8;
+    font-weight: 700;
+}
+
+.tv-ar-status-badge {
+    font-size: 1.5rem;
+    font-weight: 800;
+    padding: 8px 24px;
+    border-radius: 40px;
+}
+
+.status-active {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.status-inactive {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* ==================== Events Slide ==================== */
+.tv-events-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+.tv-events-empty {
+    font-size: 1.5rem;
+    color: #64748b;
+    padding: 40px;
+}
+
+.tv-event-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 24px 32px;
+    width: 100%;
+    text-align: left;
+    animation: rankSlideIn 0.5s ease forwards;
+    opacity: 0;
+}
+
+.tv-event-title {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: #f1f5f9;
+    margin-bottom: 8px;
+}
+
+.tv-event-desc {
+    font-size: 1.2rem;
+    color: #94a3b8;
+    line-height: 1.5;
+}
+
+/* ==================== Photos Slide ==================== */
+.tv-photo-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    max-width: 900px;
+    aspect-ratio: 16 / 9;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 20px;
+    overflow: hidden;
+}
+
+.tv-photo-empty {
+    font-size: 1.5rem;
+    color: #64748b;
+}
+
+.tv-photo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    transition: opacity 0.5s ease;
+}
+
+/* ==================== Notices Slide ==================== */
+.tv-notices-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+.tv-notices-empty {
+    font-size: 1.5rem;
+    color: #64748b;
+    padding: 40px;
+}
+
+.tv-notice-item {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 20px 28px;
+    width: 100%;
+    text-align: left;
+    animation: rankSlideIn 0.5s ease forwards;
+    opacity: 0;
+}
+
+.tv-notice-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin-bottom: 4px;
+}
+
+.tv-notice-date {
+    font-size: 0.9rem;
+    color: #64748b;
+}
+
+/* ==================== Slide Indicator Dots ==================== */
+.tv-indicator {
+    position: fixed;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 12px;
+    z-index: 10;
+}
+
+.tv-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.tv-dot.active-dot {
+    background: #60a5fa;
+    box-shadow: 0 0 12px rgba(96, 165, 250, 0.5);
+    width: 32px;
+    border-radius: 8px;
+}
+
+/* ==================== Responsive Adjustments ==================== */
+
+/* For smaller TV screens (1366x768) */
+@media (max-width: 1500px) {
+    .tv-title { font-size: 2.8rem; }
+    .tv-clock { font-size: 4.5rem; }
+    .tv-section-title { font-size: 2.5rem; }
+    .tv-visitor-count { font-size: 7rem; }
+    .tv-logo { height: 90px; }
+    .tv-ranking-item { padding: 16px 24px; }
+    .tv-rank-name { font-size: 1.5rem; }
+    .tv-rank-count { font-size: 1.4rem; }
+}
+
+/* For mobile/tablet landscape */
+@media (max-width: 1024px) {
+    .tv-title { font-size: 2.2rem; }
+    .tv-subtitle { font-size: 1.2rem; }
+    .tv-clock { font-size: 3.5rem; }
+    .tv-section-title { font-size: 2rem; }
+    .tv-visitor-count { font-size: 5rem; }
+    .tv-ranking-item { flex-wrap: wrap; gap: 12px; }
+    .tv-ranking-item { max-width: 90%; }
+    .tv-ar-info-box { min-width: 180px; padding: 24px; }
+    .tv-ar-count { font-size: 3.5rem; }
+}

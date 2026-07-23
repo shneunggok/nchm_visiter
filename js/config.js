@@ -21,4 +21,12 @@ const AGE_GROUPS = [
     "성인(40세 이상)"
 ];
 
-const PURPOSES = ["휴식", "독서", "보드게임", "탁구", "스터디룸"];
+const DEFAULT_PURPOSE_ITEMS = [
+    { icon: "☕", name: "휴식" },
+    { icon: "📖", name: "독서" },
+    { icon: "🎲", name: "보드게임" },
+    { icon: "🏓", name: "탁구" },
+    { icon: "💻", name: "스터디룸" }
+];
+
+const PURPOSES = DEFAULT_PURPOSE_ITEMS.map((item) => item.name);

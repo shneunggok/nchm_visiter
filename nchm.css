@@ -27,6 +27,11 @@ body.theme-visit { background-color: #f0f7ff; }
 .theme-visit .submit-btn { background-color: #2563eb; box-shadow: 0 8px 15px rgba(37, 99, 235, 0.3); }
 .theme-visit .check-badge { background-color: #fbbf24; color: #1e3a8a; }
 
+.attendance-event-banner { overflow: hidden; margin: 0 0 12px; border: 1px solid #bfdbfe; border-radius: 16px; background: #eff6ff; color: #1e3a8a; box-shadow: 0 3px 10px rgba(37, 99, 235, .08); }
+.attendance-event-banner-track { display: inline-block; white-space: nowrap; min-width: 100%; padding: 12px 0; font-size: .86rem; font-weight: 800; animation: attendance-marquee 22s linear infinite; }
+@keyframes attendance-marquee { from { transform: translateX(100%); } to { transform: translateX(-100%); } }
+@media (prefers-reduced-motion: reduce) { .attendance-event-banner-track { animation: none; padding-left: 16px; white-space: normal; } }
+
 /* AR 예약 테마 - 보라색(PURPLE/INDIGO) 계열 */
 body.theme-ar { background-color: #f5f3ff; }
 .theme-ar .gradient-banner { background: linear-gradient(135deg, #6366f1, #a855f7); }

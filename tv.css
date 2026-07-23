@@ -19,15 +19,34 @@ html, body {
     height: 100%;
     overflow: hidden;
     font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #0f172a;
+    background: var(--tv-background, #0f172a);
     color: #ffffff;
 }
 
-.tv-preview-controls { position: fixed; right: 20px; bottom: 20px; z-index: 20; display: flex; gap: 8px; }
-.tv-preview-controls button { border: 0; border-radius: 10px; padding: 10px 14px; background: rgba(15,23,42,.86); color: white; font-weight: 700; cursor: pointer; }
+.tv-preview-controls { position: fixed; right: 24px; bottom: 24px; z-index: 20; display: flex; gap: 8px; }
+.tv-preview-controls button { border: 1px solid rgba(255,255,255,.18); border-radius: 10px; padding: 10px 14px; background: rgba(15,23,42,.9); color: white; font-weight: 700; cursor: pointer; }
 .tv-preview-controls button:hover { background: #4f46e5; }
-[data-tv-theme="light"] { background: #f8fafc; color: #0f172a; }
-[data-tv-theme="blue"] .tv-bg-overlay { background-color: #0b3b82; }
+[data-tv-theme="light"] .tv-bg-overlay { background: linear-gradient(135deg, #e0f2fe, #f8fafc 55%, #e0e7ff); }
+[data-tv-theme="blue"] .tv-bg-overlay { background: linear-gradient(135deg, #082f6b, #0b3b82 55%, #172554); }
+[data-tv-theme="light"] .tv-section-title,
+[data-tv-theme="light"] .tv-rank-name,
+[data-tv-theme="light"] .tv-event-title,
+[data-tv-theme="light"] .tv-notice-title { color: #0f172a; }
+[data-tv-theme="light"] .tv-subtitle,
+[data-tv-theme="light"] .tv-date,
+[data-tv-theme="light"] .tv-status-text,
+[data-tv-theme="light"] .tv-section-desc,
+[data-tv-theme="light"] .tv-rank-label,
+[data-tv-theme="light"] .tv-event-desc,
+[data-tv-theme="light"] .tv-notice-date,
+[data-tv-theme="light"] .tv-ranking-empty,
+[data-tv-theme="light"] .tv-events-empty,
+[data-tv-theme="light"] .tv-photo-empty,
+[data-tv-theme="light"] .tv-notices-empty { color: #475569; }
+[data-tv-theme="light"] .tv-ranking-item,
+[data-tv-theme="light"] .tv-ar-info-box,
+[data-tv-theme="light"] .tv-event-card,
+[data-tv-theme="light"] .tv-notice-item { background: rgba(255, 255, 255, .76); border-color: rgba(15, 23, 42, .12); }
 
 /* ==================== TV Container ==================== */
 .tv-container {
@@ -49,7 +68,7 @@ html, body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #0f172a 50%, #1a1f35 75%, #0f172a 100%);
+    background: linear-gradient(135deg, var(--tv-background, #0f172a) 0%, #1e293b 25%, var(--tv-background, #0f172a) 50%, #1a1f35 75%, var(--tv-background, #0f172a) 100%);
     background-size: 400% 400%;
     animation: gradientShift 15s ease infinite;
     z-index: 0;
@@ -87,11 +106,23 @@ html, body {
 
 .tv-slide-content {
     text-align: center;
-    padding: 40px;
-    max-width: 90%;
-    max-height: 90%;
+    padding: clamp(28px, 4vw, 72px);
+    width: min(1120px, 92vw);
+    max-height: 88vh;
     z-index: 3;
     position: relative;
+}
+
+.tv-slide-content--fullscreen-notice {
+    width: 100vw;
+    height: 100vh;
+    max-height: none;
+    padding: 0;
+}
+
+.tv-slide-content--fullscreen-notice .tv-section-icon,
+.tv-slide-content--fullscreen-notice .tv-section-title {
+    display: none;
 }
 
 /* ==================== Welcome Slide ==================== */
@@ -107,7 +138,7 @@ html, body {
 }
 
 .tv-title {
-    font-size: 3.5rem;
+    font-size: clamp(2.6rem, 4.4vw, 5.3rem);
     font-weight: 900;
     letter-spacing: -0.02em;
     background: linear-gradient(135deg, #60a5fa, #a78bfa);
@@ -119,8 +150,8 @@ html, body {
 }
 
 .tv-subtitle {
-    font-size: 1.5rem;
-    color: #94a3b8;
+    font-size: clamp(1.2rem, 1.8vw, 2rem);
+    color: #cbd5e1;
     font-weight: 500;
     margin-bottom: 48px;
 }
@@ -130,7 +161,7 @@ html, body {
 }
 
 .tv-clock {
-    font-size: 6rem;
+    font-size: clamp(4.2rem, 9vw, 10rem);
     font-weight: 900;
     letter-spacing: 0.05em;
     color: #e2e8f0;
@@ -141,8 +172,8 @@ html, body {
 }
 
 .tv-date {
-    font-size: 1.5rem;
-    color: #64748b;
+    font-size: clamp(1.15rem, 1.8vw, 2rem);
+    color: #cbd5e1;
     font-weight: 500;
 }
 
@@ -184,7 +215,7 @@ html, body {
 
 .tv-status-text {
     font-size: 1rem;
-    color: #64748b;
+    color: #cbd5e1;
     font-weight: 500;
 }
 
@@ -197,7 +228,7 @@ html, body {
 
 /* ==================== Section Title ==================== */
 .tv-section-title {
-    font-size: 3rem;
+    font-size: clamp(2.4rem, 4vw, 4.5rem);
     font-weight: 900;
     color: #f1f5f9;
     margin-bottom: 32px;
@@ -206,8 +237,8 @@ html, body {
 
 /* ==================== Section Description ==================== */
 .tv-section-desc {
-    font-size: 1.2rem;
-    color: #64748b;
+    font-size: clamp(1.05rem, 1.5vw, 1.5rem);
+    color: #cbd5e1;
     margin-top: 24px;
     font-weight: 400;
 }
@@ -222,7 +253,7 @@ html, body {
 }
 
 .tv-visitor-count {
-    font-size: 10rem;
+    font-size: clamp(7rem, 16vw, 15rem);
     font-weight: 900;
     background: linear-gradient(135deg, #60a5fa, #3b82f6);
     -webkit-background-clip: text;
@@ -244,12 +275,12 @@ html, body {
     flex-direction: column;
     align-items: center;
     gap: 16px;
-    min-width: 400px;
+    width: min(760px, 100%);
 }
 
 .tv-ranking-empty {
     font-size: 1.5rem;
-    color: #64748b;
+    color: #cbd5e1;
     padding: 40px;
 }
 
@@ -262,7 +293,7 @@ html, body {
     border-radius: 20px;
     padding: 20px 32px;
     width: 100%;
-    max-width: 600px;
+    max-width: 760px;
     animation: rankSlideIn 0.5s ease forwards;
     opacity: 0;
     transform: translateX(-20px);
@@ -294,7 +325,7 @@ html, body {
 .tv-rank-other { color: #64748b; }
 
 .tv-rank-name {
-    font-size: 2rem;
+    font-size: clamp(1.4rem, 2.3vw, 2rem);
     font-weight: 700;
     color: #f1f5f9;
     flex: 1;
@@ -309,7 +340,7 @@ html, body {
 
 .tv-rank-label {
     font-size: 1rem;
-    color: #64748b;
+    color: #cbd5e1;
     font-weight: 500;
 }
 
@@ -401,6 +432,15 @@ html, body {
     opacity: 0;
 }
 
+.tv-event-image {
+    display: block;
+    width: 100%;
+    max-height: 220px;
+    object-fit: cover;
+    border-radius: 12px;
+    margin-bottom: 16px;
+}
+
 .tv-event-title {
     font-size: 1.8rem;
     font-weight: 800;
@@ -414,13 +454,22 @@ html, body {
     line-height: 1.5;
 }
 
+.tv-content-error {
+    padding: 28px 36px;
+    border: 1px solid rgba(251, 191, 36, .45);
+    border-radius: 16px;
+    color: #fde68a;
+    background: rgba(120, 53, 15, .28);
+    font-size: 1.25rem;
+}
+
 /* ==================== Photos Slide ==================== */
 .tv-photo-container {
     display: flex;
     align-items: center;
     justify-content: center;
     width: 100%;
-    max-width: 900px;
+    max-width: 1120px;
     aspect-ratio: 16 / 9;
     background: rgba(0, 0, 0, 0.3);
     border-radius: 20px;
@@ -449,6 +498,33 @@ html, body {
     margin: 0 auto;
 }
 
+.tv-notices-container--fullscreen,
+.tv-notices-container:has(.tv-notice-fullscreen) {
+    position: absolute;
+    inset: 0;
+    max-width: none;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    display: block;
+}
+
+.tv-notice-fullscreen {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background: #020617;
+    overflow: hidden;
+}
+
+.tv-notice-fullscreen img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+}
+
 .tv-notices-empty {
     font-size: 1.5rem;
     color: #64748b;
@@ -475,7 +551,7 @@ html, body {
 
 .tv-notice-date {
     font-size: 0.9rem;
-    color: #64748b;
+    color: #cbd5e1;
 }
 
 /* ==================== Slide Indicator Dots ==================== */
@@ -496,6 +572,14 @@ html, body {
     background: rgba(255, 255, 255, 0.2);
     transition: all 0.3s ease;
     cursor: pointer;
+    border: 0;
+    padding: 0;
+}
+
+.tv-dot:focus-visible,
+.tv-preview-controls button:focus-visible {
+    outline: 3px solid #f8fafc;
+    outline-offset: 4px;
 }
 
 .tv-dot.active-dot {
@@ -530,4 +614,16 @@ html, body {
     .tv-ranking-item { max-width: 90%; }
     .tv-ar-info-box { min-width: 180px; padding: 24px; }
     .tv-ar-count { font-size: 3.5rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .tv-bg-overlay,
+    .status-connecting,
+    .tv-ranking-item,
+    .tv-event-card,
+    .tv-notice-item { animation: none; }
+
+    .tv-slide,
+    .tv-photo-img,
+    .tv-dot { transition: none; }
 }

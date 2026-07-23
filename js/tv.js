@@ -45,7 +45,16 @@ let tvInitialized = false;
 let tvSettingsListener = null;
 let visitorListener = null;
 let arListener = null;
+let eventsListener = null;
+let photosListener = null;
+let noticesListener = null;
 let tvLastSettings = {};
+let clockTimer = null;
+let resumeTimer = null;
+let statusTimer = null;
+let navigationBound = false;
+let tvDestroyed = false;
+let lastRankingLoadAt = 0;
 
 // ==================== Firebase Refs ====================
 const tvSettingsRef = db.ref("tvSettings");
@@ -81,6 +90,7 @@ function cacheTVDOM() {
 // ==================== Clock & Date ====================
 
 function updateClock() {
+    if (!TV_DOM.clock || !TV_DOM.dateDisplay) return;
     const now = new Date();
     const hours = String(now.getHours()).padStart(2, "0");
     const minutes = String(now.getMinutes()).padStart(2, "0");
@@ -101,6 +111,8 @@ function setConnectionStatus(status, text) {
     const dot = TV_DOM.connectionStatus;
     const txt = TV_DOM.statusText;
 
+    if (!dot || !txt) return;
+
     // Remove all status classes
     dot.className = "tv-status-dot";
     
@@ -118,6 +130,22 @@ function setConnectionStatus(status, text) {
 
 // ==================== Slideshow Control ====================
 
+function getPlayableSlideIndexes() {
+    return TV_CONFIG.slideOrder.reduce(function(indexes, slideId, index) {
+        var sourceId = String(slideId || "").split("-")[0];
+        if (TV_CONFIG.enabledSlides[slideId] && TV_DOM.slideMap[sourceId]) indexes.push(index);
+        return indexes;
+    }, []);
+}
+
+function getSlideDuration(index) {
+    var slides = tvLastSettings.slides;
+    var slideId = TV_CONFIG.slideOrder[index];
+    var slide = Array.isArray(slides) ? slides.find(function(item) { return item && item.id === slideId; }) : null;
+    var seconds = Number(slide && slide.duration);
+    return Math.max(3000, (Number.isFinite(seconds) ? seconds * 1000 : TV_CONFIG.slideInterval));
+}
+
 function showSlide(index) {
     if (isTransitioning) return;
     if (index < 0 || index >= TV_CONFIG.slideOrder.length) return;
@@ -129,7 +157,7 @@ function showSlide(index) {
     const sourceId = slideId.split("-")[0];
 
     // Skip slide if it's disabled in settings
-    if (!TV_CONFIG.enabledSlides[slideId]) {
+    if (!TV_CONFIG.enabledSlides[slideId] || !TV_DOM.slideMap[sourceId]) {
         isTransitioning = false;
         // Find next enabled slide
         advanceSlide();
@@ -156,9 +184,7 @@ function showSlide(index) {
 
     // Trigger slide-specific refresh
     refreshSlideContent(sourceId);
-    db.ref("tvStatus").set({ online: true, lastSync: firebase.database.ServerValue.TIMESTAMP, currentSlide: sourceId }).catch(function(error) {
-        console.warn("[tv] status update skipped:", error.code || error.message);
-    });
+    updateTVStatus(sourceId);
 
     setTimeout(function() {
         isTransitioning = false;
@@ -166,46 +192,31 @@ function showSlide(index) {
 }
 
 function advanceSlide() {
-    var nextIndex = currentSlideIndex + 1;
-
-    // Find next enabled slide
-    var attempts = 0;
-    while (attempts < TV_CONFIG.slideOrder.length) {
-        if (nextIndex >= TV_CONFIG.slideOrder.length) {
-            nextIndex = 0;
-        }
-        var slideId = TV_CONFIG.slideOrder[nextIndex];
-        if (TV_CONFIG.enabledSlides[slideId]) {
-            break;
-        }
-        nextIndex++;
-        attempts++;
-    }
-
-    showSlide(nextIndex);
+    var playable = getPlayableSlideIndexes();
+    if (!playable.length) return;
+    var currentPosition = playable.indexOf(currentSlideIndex);
+    var nextPosition = currentPosition < 0 ? 0 : (currentPosition + 1) % playable.length;
+    showSlide(playable[nextPosition]);
 }
 
 function startSlideshow() {
-    if (slideTimer) {
-        clearInterval(slideTimer);
+    stopSlideshow();
+    var playable = getPlayableSlideIndexes();
+    if (!playable.length) {
+        setConnectionStatus("error", "표시할 화면 설정이 없습니다");
+        return;
     }
+    if (playable.indexOf(currentSlideIndex) < 0) currentSlideIndex = playable[0];
+    showSlide(currentSlideIndex);
+    scheduleNextSlide();
+}
 
-    // Show first enabled slide
-    var firstIndex = 0;
-    for (var i = 0; i < TV_CONFIG.slideOrder.length; i++) {
-        if (TV_CONFIG.enabledSlides[TV_CONFIG.slideOrder[i]]) {
-            firstIndex = i;
-            break;
-        }
-    }
-    showSlide(firstIndex);
-
-    const scheduleNext = function() {
-        const slide = tvLastSettings.slides && tvLastSettings.slides[currentSlideIndex];
-        const duration = Math.max(3000, Number(slide && slide.duration || TV_CONFIG.slideInterval / 1000) * 1000);
-        slideTimer = setTimeout(function() { advanceSlide(); scheduleNext(); }, duration);
-    };
-    scheduleNext();
+function scheduleNextSlide() {
+    if (!getPlayableSlideIndexes().length || tvDestroyed) return;
+    slideTimer = window.setTimeout(function() {
+        advanceSlide();
+        scheduleNextSlide();
+    }, getSlideDuration(currentSlideIndex));
 }
 
 function stopSlideshow() {
@@ -215,31 +226,43 @@ function stopSlideshow() {
     }
 }
 
+function restartSlideshowAfterManualNavigation() {
+    window.clearTimeout(resumeTimer);
+    resumeTimer = window.setTimeout(startSlideshow, getSlideDuration(currentSlideIndex) * 2);
+}
+
+function updateTVStatus(slideId) {
+    window.clearTimeout(statusTimer);
+    statusTimer = window.setTimeout(function() {
+        db.ref("tvStatus").set({ online: true, lastSync: firebase.database.ServerValue.TIMESTAMP, currentSlide: slideId }).catch(function(error) {
+            console.warn("[tv] status update skipped:", error.code || error.message);
+        });
+    }, 100);
+}
+
 // ==================== Slide Content Refresh ====================
 
 function refreshSlideContent(slideId) {
     switch (slideId) {
         case "visitors":
-            loadTodayVisitors();
             break;
         case "ranking":
-            loadAttendanceRanking();
+            if (Date.now() - lastRankingLoadAt > 300000) {
+                lastRankingLoadAt = Date.now();
+                loadAttendanceRanking();
+            }
             break;
         case "ar":
             loadARStatus();
             break;
-        case "events":
-            loadEvents();
-            break;
-        case "photos":
-            loadPhotos();
-            break;
-        case "notices":
-            loadNotices();
-            break;
         default:
             break;
     }
+}
+
+function renderContentError(container, message) {
+    if (!container) return;
+    container.innerHTML = "<div class='tv-content-error' role='status'>" + escapeHtml(message) + "</div>";
 }
 
 // ==================== Firebase: TV Settings Subscription ====================
@@ -257,9 +280,14 @@ function subscribeTVSettings() {
         tvLastSettings = settings;
         // Update enabled slides and playlist from settings
         if (Array.isArray(settings.slides) && settings.slides.length) {
-            TV_CONFIG.slideOrder = settings.slides.map(function(slide) { return slide.id; });
-            TV_CONFIG.enabledSlides = {};
-            settings.slides.forEach(function(slide) { TV_CONFIG.enabledSlides[slide.id] = slide.enabled !== false; });
+            var validSlides = settings.slides.filter(function(slide) {
+                return slide && typeof slide.id === "string" && TV_DOM.slideMap[slide.id.split("-")[0]];
+            });
+            if (validSlides.length) {
+                TV_CONFIG.slideOrder = validSlides.map(function(slide) { return slide.id; });
+                TV_CONFIG.enabledSlides = {};
+                validSlides.forEach(function(slide) { TV_CONFIG.enabledSlides[slide.id] = slide.enabled !== false; });
+            }
         }
         if (settings.display) {
             var keys = Object.keys(TV_CONFIG.enabledSlides);
@@ -272,16 +300,11 @@ function subscribeTVSettings() {
         }
 
         // Update slide interval if configured
-        if (settings.slideInterval && settings.slideInterval >= 3000) {
-            TV_CONFIG.slideInterval = settings.slideInterval;
-            // Restart slideshow with new interval
-            if (tvInitialized) {
-                startSlideshow();
-            }
-        }
+        if (Number(settings.slideInterval) >= 3000) TV_CONFIG.slideInterval = Number(settings.slideInterval);
         applyTVAppearance(settings);
 
         setConnectionStatus("connected", "Firebase 연결됨");
+        if (tvInitialized) startSlideshow();
     }, function(error) {
         console.error("[tv] TV settings subscription error:", error);
         setConnectionStatus("error", "Firebase 연결 오류");
@@ -295,27 +318,19 @@ function applyTVAppearance(settings) {
     var bg = settings.background || {};
     if (bg.color) root.style.setProperty("--tv-background", bg.color);
     var overlay = document.querySelector(".tv-bg-overlay");
-    if (overlay && bg.image) overlay.style.backgroundImage = "linear-gradient(rgba(15,23,42,.65),rgba(15,23,42,.65)),url('" + bg.image.replace(/'/g, "%27") + "')";
+    if (overlay) {
+        overlay.style.backgroundImage = bg.image ? "linear-gradient(rgba(15,23,42,.65),rgba(15,23,42,.65)),url('" + String(bg.image).replace(/'/g, "%27") + "')" : "";
+    }
     var welcome = settings.welcome || {};
-    if (welcome.title) document.querySelector(".tv-title").textContent = welcome.title;
-    if (welcome.subtitle) document.querySelector(".tv-subtitle").textContent = welcome.subtitle;
-    if (welcome.logo) document.querySelector(".tv-logo").src = welcome.logo;
+    var title = document.querySelector(".tv-title");
+    var subtitle = document.querySelector(".tv-subtitle");
+    var logo = document.querySelector(".tv-logo");
+    if (title && welcome.title) title.textContent = welcome.title;
+    if (subtitle && welcome.subtitle) subtitle.textContent = welcome.subtitle;
+    if (logo && welcome.logo) logo.src = welcome.logo;
 }
 
 // ==================== Firebase: Today's Visitors ====================
-
-function loadTodayVisitors() {
-    var todayStr = formatLocalDate(new Date());
-    var query = visitLogsRef.orderByChild("date").equalTo(todayStr);
-
-    query.once("value").then(function(snapshot) {
-        var count = snapshot.numChildren();
-        TV_DOM.todayCount.textContent = count;
-    }).catch(function(error) {
-        console.error("[tv] loadTodayVisitors error:", error);
-    });
-}
-
 function subscribeTodayVisitors() {
     var todayStr = formatLocalDate(new Date());
     var query = visitLogsRef.orderByChild("date").equalTo(todayStr);
@@ -329,6 +344,7 @@ function subscribeTodayVisitors() {
         }
     }, function(error) {
         console.error("[tv] subscribeTodayVisitors error:", error);
+        setConnectionStatus("error", "방문자 연결 오류");
     });
 }
 
@@ -430,6 +446,7 @@ function computeRankingFromLogs(monthKey) {
 
 function renderRanking(ranking) {
     var list = TV_DOM.rankingList;
+    if (!list) return;
     if (!ranking || ranking.length === 0) {
         list.innerHTML = "<div class='tv-ranking-empty'>출석 정보가 없습니다</div>";
         return;
@@ -464,7 +481,7 @@ function loadARStatus() {
 
     query.once("value").then(function(snapshot) {
         var count = snapshot.numChildren();
-        TV_DOM.arCount.textContent = count;
+        if (TV_DOM.arCount) TV_DOM.arCount.textContent = count;
 
         // Check if AR is currently active (within operating hours)
         var now = new Date();
@@ -479,6 +496,7 @@ function loadARStatus() {
             isOperating = hour >= 10 && hour < 21;
         }
 
+        if (!TV_DOM.arStatus) return;
         if (isOperating) {
             TV_DOM.arStatus.textContent = "운영 중";
             TV_DOM.arStatus.className = "tv-ar-status-badge status-active";
@@ -488,6 +506,10 @@ function loadARStatus() {
         }
     }).catch(function(error) {
         console.error("[tv] loadARStatus error:", error);
+        if (TV_DOM.arStatus) {
+            TV_DOM.arStatus.textContent = "확인 불가";
+            TV_DOM.arStatus.className = "tv-ar-status-badge status-inactive";
+        }
     });
 }
 
@@ -504,22 +526,19 @@ function subscribeARStatus() {
         }
     }, function(error) {
         console.error("[tv] subscribeARStatus error:", error);
+        setConnectionStatus("error", "AR 예약 연결 오류");
     });
 }
 
 // ==================== Firebase: Events ====================
 
-function loadEvents() {
-    var eventsRef = db.ref("tvContent/events");
-    eventsRef.once("value").then(function(snapshot) {
-        var events = snapshot.val();
-        var container = TV_DOM.eventsContainer;
-
-        if (!events) {
-            container.innerHTML = "<div class='tv-events-empty'>진행 중인 이벤트가 없습니다</div>";
-            return;
-        }
-
+function renderEvents(events) {
+    var container = TV_DOM.eventsContainer;
+    if (!container) return;
+    if (!events || typeof events !== "object") {
+        container.innerHTML = "<div class='tv-events-empty'>진행 중인 이벤트가 없습니다</div>";
+        return;
+    }
         var now = new Date().getTime();
         var activeEvents = [];
         var keys = Object.keys(events);
@@ -528,7 +547,7 @@ function loadEvents() {
             var event = events[keys[i]];
             if (event && event.enabled !== false) {
                 var startTime = event.startDate ? new Date(event.startDate).getTime() : 0;
-                var endTime = event.endDate ? new Date(event.endDate).getTime() : Infinity;
+                var endTime = event.endDate ? new Date(event.endDate + "T23:59:59").getTime() : Infinity;
 
                 if (startTime <= now && endTime >= now) {
                     activeEvents.push(event);
@@ -555,34 +574,32 @@ function loadEvents() {
         }
 
         container.innerHTML = html;
-    }).catch(function(error) {
-        console.error("[tv] loadEvents error:", error);
-    });
+        container.querySelectorAll(".tv-event-image").forEach(function(image) {
+            image.addEventListener("error", function() { image.remove(); }, { once: true });
+        });
 }
 
 function subscribeEvents() {
     var eventsRef = db.ref("tvContent/events");
+    if (eventsListener) eventsListener.off();
+    eventsListener = eventsRef;
     eventsRef.on("value", function(snapshot) {
-        // Re-load events whenever data changes
-        loadEvents();
+        renderEvents(snapshot.val());
     }, function(error) {
         console.error("[tv] subscribeEvents error:", error);
+        renderContentError(TV_DOM.eventsContainer, "이벤트 연결 오류");
     });
 }
 
 // ==================== Firebase: Photos ====================
 
-function loadPhotos() {
-    var photosRef = db.ref("tvContent/photos");
-    photosRef.once("value").then(function(snapshot) {
-        var photos = snapshot.val();
+function renderPhotos(photos) {
         var container = TV_DOM.photoContainer;
-
-        if (!photos) {
+        if (!container) return;
+        if (!photos || typeof photos !== "object") {
             container.innerHTML = "<div class='tv-photo-empty'>등록된 사진이 없습니다</div>";
             return;
         }
-
         var photoList = [];
         var keys = Object.keys(photos);
         for (var i = 0; i < keys.length; i++) {
@@ -597,43 +614,48 @@ function loadPhotos() {
             return;
         }
 
-        // Show first photo
-        container.innerHTML = "<img src='" + escapeHtml(photoList[0].url) + "' alt='갤러리' class='tv-photo-img' onerror='this.style.display=\"none\"'>";
-    }).catch(function(error) {
-        console.error("[tv] loadPhotos error:", error);
-    });
+        var image = document.createElement("img");
+        image.src = photoList[0].url;
+        image.alt = "갤러리 사진";
+        image.className = "tv-photo-img";
+        image.onerror = function() {
+            container.innerHTML = "<div class='tv-photo-empty'>사진을 표시할 수 없습니다</div>";
+        };
+        container.replaceChildren(image);
 }
 
 function subscribePhotos() {
     var photosRef = db.ref("tvContent/photos");
+    if (photosListener) photosListener.off();
+    photosListener = photosRef;
     photosRef.on("value", function(snapshot) {
-        loadPhotos();
+        renderPhotos(snapshot.val());
     }, function(error) {
         console.error("[tv] subscribePhotos error:", error);
+        renderContentError(TV_DOM.photoContainer, "사진 연결 오류");
     });
 }
 
 // ==================== Firebase: Notices ====================
 
-function loadNotices() {
-    var noticesRef = db.ref("tvContent/notices");
-    noticesRef.once("value").then(function(snapshot) {
-        var notices = snapshot.val();
+function renderNotices(notices) {
         var container = TV_DOM.noticesContainer;
-
-        if (!notices) {
+        if (!container) return;
+        container.classList.remove("tv-notices-container--fullscreen");
+        var slideContent = container.closest(".tv-slide-content");
+        if (slideContent) slideContent.classList.remove("tv-slide-content--fullscreen-notice");
+        if (!notices || typeof notices !== "object") {
             container.innerHTML = "<div class='tv-notices-empty'>공지사항이 없습니다</div>";
             return;
         }
-
         var noticeList = [];
         var keys = Object.keys(notices);
+        var now = Date.now();
         for (var i = 0; i < keys.length; i++) {
             var notice = notices[keys[i]];
-            var now = Date.now();
             var start = notice && notice.startDate ? new Date(notice.startDate).getTime() : 0;
             var end = notice && notice.endDate ? new Date(notice.endDate + "T23:59:59").getTime() : Infinity;
-            if (notice && notice.title && start <= now && end >= now) {
+            if (notice && (notice.title || notice.image || notice.imageUrl || notice.url) && start <= now && end >= now) {
                 noticeList.push(notice);
             }
         }
@@ -648,6 +670,24 @@ function loadNotices() {
             return Number(b.emergency) - Number(a.emergency) || (b.priority || 0) - (a.priority || 0) || (b.createdAt || 0) - (a.createdAt || 0);
         });
 
+        var imageNotice = noticeList.find(function(notice) {
+            return notice && (notice.image || notice.imageUrl || notice.url);
+        });
+        if (imageNotice) {
+            var noticeImage = imageNotice.image || imageNotice.imageUrl || imageNotice.url;
+            container.classList.add("tv-notices-container--fullscreen");
+            if (slideContent) slideContent.classList.add("tv-slide-content--fullscreen-notice");
+            container.innerHTML = "<figure class='tv-notice-fullscreen'><img src='" + escapeHtml(noticeImage) + "' alt='" + escapeHtml(imageNotice.title || "공지 이미지") + "'></figure>";
+            var image = container.querySelector(".tv-notice-fullscreen img");
+            if (image) {
+                image.addEventListener("error", function() {
+                    image.remove();
+                    container.innerHTML = "<div class='tv-notices-empty'>공지 이미지를 불러오지 못했습니다</div>";
+                }, { once: true });
+            }
+            return;
+        }
+
         var html = "";
         var maxNotices = Math.min(noticeList.length, 5); // Show max 5 notices
         for (var j = 0; j < maxNotices; j++) {
@@ -661,23 +701,24 @@ function loadNotices() {
         }
 
         container.innerHTML = html;
-    }).catch(function(error) {
-        console.error("[tv] loadNotices error:", error);
-    });
 }
 
 function subscribeNotices() {
     var noticesRef = db.ref("tvContent/notices");
+    if (noticesListener) noticesListener.off();
+    noticesListener = noticesRef;
     noticesRef.on("value", function(snapshot) {
-        loadNotices();
+        renderNotices(snapshot.val());
     }, function(error) {
         console.error("[tv] subscribeNotices error:", error);
+        renderContentError(TV_DOM.noticesContainer, "공지사항 연결 오류");
     });
 }
 
 // ==================== Manual Dot Click Navigation ====================
 
 function setupDotNavigation() {
+    if (navigationBound) return;
     TV_DOM.dots.forEach(function(dot) {
         dot.addEventListener("click", function() {
             var slideId = this.getAttribute("data-slide");
@@ -685,10 +726,7 @@ function setupDotNavigation() {
             if (index >= 0) {
                 stopSlideshow();
                 showSlide(index);
-                // Restart after manual navigation
-                setTimeout(function() {
-                    startSlideshow();
-                }, TV_CONFIG.slideInterval * 2);
+                restartSlideshowAfterManualNavigation();
             }
         });
     });
@@ -697,19 +735,21 @@ function setupDotNavigation() {
 // ==================== Keyboard Shortcuts ====================
 
 function setupKeyboardShortcuts() {
+    if (navigationBound) return;
+    navigationBound = true;
     document.addEventListener("keydown", function(e) {
         if (e.key === "ArrowRight" || e.key === "ArrowDown") {
             e.preventDefault();
             stopSlideshow();
             advanceSlide();
-            setTimeout(function() { startSlideshow(); }, TV_CONFIG.slideInterval * 2);
+            restartSlideshowAfterManualNavigation();
         } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
             e.preventDefault();
             stopSlideshow();
             var prevIndex = currentSlideIndex - 1;
             if (prevIndex < 0) prevIndex = TV_CONFIG.slideOrder.length - 1;
             showSlide(prevIndex);
-            setTimeout(function() { startSlideshow(); }, TV_CONFIG.slideInterval * 2);
+            restartSlideshowAfterManualNavigation();
         } else if (e.key === " ") {
             e.preventDefault();
             if (slideTimer) {
@@ -724,11 +764,12 @@ function setupKeyboardShortcuts() {
 // ==================== Initialize TV ====================
 
 function initializeTV() {
+    if (tvInitialized) return;
     cacheTVDOM();
 
     // Start clock
     updateClock();
-    setInterval(updateClock, 1000);
+    clockTimer = window.setInterval(updateClock, 1000);
 
     // Set connection status to connecting
     setConnectionStatus("connecting", "Firebase 연결 중...");
@@ -766,7 +807,9 @@ function initializeTV() {
 function setupPreviewControls() {
     if (!new URLSearchParams(location.search).has("preview")) return;
     var controls = document.getElementById("tv-preview-controls");
+    if (!controls || controls.dataset.bound) return;
     controls.classList.remove("hidden");
+    controls.dataset.bound = "true";
     controls.addEventListener("click", function(event) {
         var action = event.target.dataset.tvPreview;
         if (!action) return;
@@ -779,10 +822,17 @@ function setupPreviewControls() {
 }
 
 window.addEventListener("pagehide", function() {
+    tvDestroyed = true;
     stopSlideshow();
+    window.clearTimeout(resumeTimer);
+    window.clearTimeout(statusTimer);
+    window.clearInterval(clockTimer);
     if (tvSettingsListener) tvSettingsListener.off();
     if (visitorListener) visitorListener.off();
     if (arListener) arListener.off();
+    if (eventsListener) eventsListener.off();
+    if (photosListener) photosListener.off();
+    if (noticesListener) noticesListener.off();
     db.ref("tvStatus").set({ online: false, lastSync: firebase.database.ServerValue.TIMESTAMP }).catch(function() {});
 });
 

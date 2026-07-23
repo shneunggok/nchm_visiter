@@ -432,13 +432,19 @@ html, body {
     opacity: 0;
 }
 
+.tv-event-images {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
 .tv-event-image {
     display: block;
     width: 100%;
-    max-height: 220px;
+    height: 180px;
     object-fit: cover;
     border-radius: 12px;
-    margin-bottom: 16px;
 }
 
 .tv-event-title {
@@ -519,10 +525,16 @@ html, body {
 }
 
 .tv-notice-fullscreen img {
-    width: 100%;
-    height: 100%;
+    width: 100vw;
+    height: 100vh;
     display: block;
     object-fit: cover;
+}
+
+body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-bg-overlay,
+body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-indicator,
+body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls {
+    display: none;
 }
 
 .tv-notices-empty {
@@ -551,6 +563,13 @@ html, body {
 
 .tv-notice-date {
     font-size: 0.9rem;
+    color: #cbd5e1;
+}
+
+.tv-notice-description {
+    margin-top: 8px;
+    font-size: 1.05rem;
+    line-height: 1.6;
     color: #cbd5e1;
 }
 

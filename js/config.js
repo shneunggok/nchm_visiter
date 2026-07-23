@@ -3,13 +3,18 @@ const firebaseConfig = {
     authDomain: "nchm-131bb.firebaseapp.com",
     databaseURL: "https://nchm-131bb-default-rtdb.firebaseio.com",
     projectId: "nchm-131bb",
-    storageBucket: "nchm-131bb.firebasestorage.app",
     messagingSenderId: "592225829882",
     appId: "1:592225829882:web:92942c947bbc498926da43",
     measurementId: "G-W0YLVVCQ9R"
 };
 
 const ADMIN_EMAIL = "shneunggok@gmail.com";
+const CLOUDINARY_CONFIG = Object.freeze({
+    cloudName: "jywxsoly",
+    uploadPreset: "tv_notice_upload",
+    noticeAssetFolder: "tv/notices",
+    eventAssetFolder: "tv/events"
+});
 
 const AGE_GROUPS = [
     "초등(9~13세)",
@@ -21,12 +26,4 @@ const AGE_GROUPS = [
     "성인(40세 이상)"
 ];
 
-const DEFAULT_PURPOSE_ITEMS = [
-    { icon: "☕", name: "휴식" },
-    { icon: "📖", name: "독서" },
-    { icon: "🎲", name: "보드게임" },
-    { icon: "🏓", name: "탁구" },
-    { icon: "💻", name: "스터디룸" }
-];
-
-const PURPOSES = DEFAULT_PURPOSE_ITEMS.map((item) => item.name);
+const PURPOSES = ["휴식", "독서", "보드게임", "탁구", "스터디룸"];

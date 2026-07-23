@@ -10,64 +10,8 @@ let isSubmittingAr = false;
 let visitCount = 0;
 let arCount = 0;
 let attendanceEventsQuery = null;
-let visitPurposesQuery = null;
-let visitPurposeItems = DEFAULT_PURPOSE_ITEMS.map((item) => ({ ...item }));
-
-function visitPurposesRef() {
-    return db.ref("tvContent/visitPurposes");
-}
-
-function normalizeVisitPurposeItems(value) {
-    const rawItems = Array.isArray(value)
-        ? value
-        : Array.isArray(value && value.items)
-            ? value.items
-            : [];
-    const source = rawItems.length ? rawItems : DEFAULT_PURPOSE_ITEMS;
-    const items = source.slice(0, 5).map((item, index) => ({
-        icon: String((item && item.icon) || DEFAULT_PURPOSE_ITEMS[index]?.icon || "•").trim().slice(0, 4) || "•",
-        name: String((item && item.name) || DEFAULT_PURPOSE_ITEMS[index]?.name || "").trim().slice(0, 12)
-    })).filter((item) => item.name);
-
-    while (items.length < 5) {
-        const fallback = DEFAULT_PURPOSE_ITEMS[items.length];
-        items.push({ icon: fallback.icon, name: fallback.name });
-    }
-    return items;
-}
-
-function applyVisitPurposeItems(items) {
-    visitPurposeItems = normalizeVisitPurposeItems({ items });
-    PURPOSES.splice(0, PURPOSES.length, ...visitPurposeItems.map((item) => item.name));
-}
-
-function renderVisitPurposeButtons() {
-    const grid = document.getElementById("visit-purpose-grid");
-    if (!grid) return;
-    grid.innerHTML = visitPurposeItems.map((item) => `
-        <button type="button" onclick="togglePurpose(this)" class="choice-btn v-purpose flex flex-col items-center p-3 rounded-2xl" data-purpose="${escapeHtml(item.name)}">
-            <span class="text-3xl leading-none mb-1" aria-hidden="true">${escapeHtml(item.icon)}</span>
-            <span class="text-[12px] font-bold">${escapeHtml(item.name)}</span>
-            <div class="check-badge"><i data-lucide="check" class="w-3 h-3"></i></div>
-        </button>
-    `).join("");
-    refreshIcons();
-}
-
-function subscribeVisitPurposes() {
-    if (visitPurposesQuery) visitPurposesQuery.off();
-    visitPurposesQuery = visitPurposesRef();
-    visitPurposesQuery.on("value", (snapshot) => {
-        applyVisitPurposeItems(snapshot.val());
-        renderVisitPurposeButtons();
-        renderVisitPurposeSettings();
-        updateAdminDashboard();
-    }, (error) => {
-        logError("visit-purposes", error);
-        applyVisitPurposeItems(DEFAULT_PURPOSE_ITEMS);
-        renderVisitPurposeButtons();
-    });
-}
+let attendanceEventsState = {};
+let attendanceTickerResizeTimer = null;
 
 function getActiveAttendanceEvents(events) {
     const today = formatLocalDate(new Date());
@@ -75,18 +19,61 @@ function getActiveAttendanceEvents(events) {
 }
 
 function renderAttendanceEventBanner(events) {
+    attendanceEventsState = events || {};
     const banner = document.getElementById("attendance-event-banner");
     const track = document.getElementById("attendance-event-banner-track");
     if (!banner || !track) return;
     const activeEvents = getActiveAttendanceEvents(events);
-    if (!activeEvents.length) { banner.classList.add("hidden"); track.textContent = ""; return; }
-    track.textContent = activeEvents.map((event) => {
+    banner.dataset.hasEvents = activeEvents.length ? "true" : "false";
+    if (!activeEvents.length) {
+        banner.classList.add("hidden");
+        track.textContent = "";
+        return;
+    }
+    const message = activeEvents.map((event) => {
         const icon = event.type === "ar" ? "🎮" : "🎉";
         const typeName = event.type === "ar" ? "AR 출석 이벤트" : "방문 출석 이벤트";
         const criterion = event.criteriaLabel || `${event.criteriaCount || 1}회 이상`;
-        return `${icon} 현재 ${typeName} 「${event.title || "이벤트"}」가 진행중입니다! ${event.startDate} ~ ${event.endDate || "종료일 미정"} · ${criterion} 시 추첨을 통해 ${event.winnerCount || 0}명을 선정합니다. ${event.description || "자세한 내용은 로비 이벤트 안내물을 확인해주세요."}`;
+        return `${icon} 현재 ${typeName} 「${event.title || "이벤트"}」가 진행중입니다! ${event.startDate} ~ ${event.endDate || "종료일 미정"} · ${criterion} 시 추첨을 통해 ${event.winnerCount || 0}명을 선정합니다. ${event.description || "자세한 내용은 로비 이벤트 안내물을 확인해주세요."} 🎉`;
     }).join("     ·     ");
-    banner.classList.remove("hidden");
+
+    // Make each half of the ticker wider than the viewport even when the
+    // original message is short. Two identical halves can then loop at -50%
+    // without a jump or an empty interval.
+    const estimatedCharacterWidth = window.innerWidth <= 640 ? 8 : 9;
+    const minimumGroupCharacters = Math.ceil((window.innerWidth * 1.35) / estimatedCharacterWidth);
+    const repeatCount = Math.max(1, Math.ceil(minimumGroupCharacters / Math.max(message.length, 1)));
+    const tickerGap = "\u00A0".repeat(12);
+    const repeatedMessage = Array(repeatCount).fill(message).join(tickerGap);
+    const durationSeconds = Math.max(16, Math.min(55, repeatedMessage.length * 0.18));
+
+    const firstText = document.createElement("span");
+    firstText.className = "attendance-event-banner-text";
+    firstText.textContent = repeatedMessage;
+
+    const duplicateText = document.createElement("span");
+    duplicateText.className = "attendance-event-banner-text";
+    duplicateText.textContent = repeatedMessage;
+    duplicateText.setAttribute("aria-hidden", "true");
+
+    track.replaceChildren(firstText, duplicateText);
+    track.style.setProperty("--attendance-ticker-duration", `${durationSeconds}s`);
+    updateAttendanceEventBannerVisibility();
+}
+
+window.addEventListener("resize", () => {
+    window.clearTimeout(attendanceTickerResizeTimer);
+    attendanceTickerResizeTimer = window.setTimeout(() => {
+        renderAttendanceEventBanner(attendanceEventsState);
+    }, 150);
+});
+
+function updateAttendanceEventBannerVisibility() {
+    const banner = document.getElementById("attendance-event-banner");
+    if (!banner) return;
+    const visitIsVisible = !dom.sectionVisit.classList.contains("hidden")
+        && !dom.mainTabs.classList.contains("hidden");
+    banner.classList.toggle("hidden", banner.dataset.hasEvents !== "true" || !visitIsVisible);
 }
 
 function subscribeAttendanceEventBanner() {
@@ -143,6 +130,7 @@ function switchTab(type) {
         generateTimeSlots();
         showArNotice();
     }
+    updateAttendanceEventBannerVisibility();
 }
 
 function switchAdminSubTab(tab) {
@@ -760,12 +748,41 @@ function initializePage() {
     changeVisitCount(1);
     refreshIcons();
 
-    auth.signInAnonymously()
-        .catch((e) => logError("anon-auth", e))
-        .finally(() => {
+    const authLoading = document.getElementById("auth-loading");
+    let authResolved = false;
+
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+        .catch((error) => logError("auth-persistence", error));
+
+    auth.onAuthStateChanged(async (user) => {
+        if (authResolved && user && user.isAnonymous) return;
+        try {
+            if (restoreAdminSession(user)) {
+                authResolved = true;
+                return;
+            }
+
+            if (user && !user.isAnonymous) {
+                showMessage("관리자 계정이 아니므로 접근이 차단되었습니다.", "info");
+                await auth.signOut();
+                return;
+            }
+
+            if (!user) {
+                await auth.signInAnonymously();
+                return;
+            }
+
+            authResolved = true;
             subscribeArLogsToday();
             subscribeAttendanceEventBanner();
-        });
+        } catch (error) {
+            logError("auth-restore", error);
+            showMessage("로그인 상태를 확인하지 못했습니다. 새로고침 후 다시 시도해 주세요.");
+        } finally {
+            if (authResolved && authLoading) authLoading.classList.add("hidden");
+        }
+    });
 }
 
 document.addEventListener("DOMContentLoaded", initializePage);

@@ -9,6 +9,10 @@ const ADMIN_LOGIN_LOCK_MS = 60 * 1000;
 const ADMIN_IDLE_LOGOUT_MS = 30 * 60 * 1000;
 
 function openPasswordModal() {
+    if (isAdminUser) {
+        enterAdminMode();
+        return;
+    }
     dom.passwordModal.classList.remove("hidden");
     dom.adminPasswordInput.value = "";
     dom.adminPasswordInput.focus();
@@ -50,7 +54,7 @@ async function verifyAdminPassword() {
         // client before opening admin-only tools such as TV settings.
         await credential.user.getIdToken(true);
         const tokenResult = await credential.user.getIdTokenResult();
-        if (tokenResult.claims.email !== ADMIN_EMAIL) {
+        if (String(tokenResult.claims.email || "").toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
             await auth.signOut();
             showMessage("관리자 권한이 없는 계정입니다.");
             return;
@@ -63,12 +67,7 @@ async function verifyAdminPassword() {
         closePasswordModal();
         subscribeVisitLogs();
         subscribeArLogsAll();
-        resetAdminIdleTimeout();
-        initializeAdminActivityWatchers();
-
-        setTimeout(() => {
-            enterAdminMode();
-        }, 500);
+        enterAdminMode();
     } catch (e) {
         logError("verifyAdminPassword", e);
         adminLoginFailCount += 1;
@@ -93,6 +92,9 @@ function enterAdminMode() {
     dom.adminEntryBtn.classList.add("hidden");
     dom.exitAdminBtn.classList.remove("hidden");
     dom.mainContentContainer.classList.replace("max-w-xl", "max-w-6xl");
+    if (typeof updateAttendanceEventBannerVisibility === "function") {
+        updateAttendanceEventBannerVisibility();
+    }
     updateAdminDashboard();
 }
 
@@ -111,39 +113,26 @@ function exitAdmin() {
         adminIdleTimer = null;
     }
 
-    auth.signOut()
-        .then(() => auth.signInAnonymously())
-        .catch((e) => logError("exitAdmin-reauth", e));
+    auth.signOut().catch((e) => logError("exitAdmin", e));
 
     switchTab("visit");
 }
 
-function resetAdminIdleTimeout() {
-    if (!isAdminUser) return;
-    if (adminIdleTimer) {
-        clearTimeout(adminIdleTimer);
-    }
-    adminIdleTimer = setTimeout(() => {
-        if (isAdminUser) {
-            showMessage("관리자 세션이 자동으로 종료되었습니다.", "info");
-            exitAdmin();
-        }
-    }, ADMIN_IDLE_LOGOUT_MS);
-}
+function resetAdminIdleTimeout() {}
 
 function initializeAdminActivityWatchers() {
-    if (adminActivityWatchersInitialized) return;
     adminActivityWatchersInitialized = true;
+}
 
-    const handler = () => {
-        if (isAdminUser) {
-            resetAdminIdleTimeout();
-        }
-    };
-
-    document.addEventListener("click", handler);
-    document.addEventListener("keydown", handler);
-    document.addEventListener("mousemove", handler);
+function restoreAdminSession(user) {
+    if (!user || user.isAnonymous || String(user.email || "").toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+        return false;
+    }
+    isAdminUser = true;
+    subscribeVisitLogs();
+    subscribeArLogsAll();
+    enterAdminMode();
+    return true;
 }
 
 

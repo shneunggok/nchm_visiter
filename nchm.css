@@ -27,10 +27,65 @@ body.theme-visit { background-color: #f0f7ff; }
 .theme-visit .submit-btn { background-color: #2563eb; box-shadow: 0 8px 15px rgba(37, 99, 235, 0.3); }
 .theme-visit .check-badge { background-color: #fbbf24; color: #1e3a8a; }
 
-.attendance-event-banner { overflow: hidden; margin: 0 0 12px; border: 1px solid #bfdbfe; border-radius: 16px; background: #eff6ff; color: #1e3a8a; box-shadow: 0 3px 10px rgba(37, 99, 235, .08); }
-.attendance-event-banner-track { display: inline-block; white-space: nowrap; min-width: 100%; padding: 12px 0; font-size: .86rem; font-weight: 800; animation: attendance-marquee 22s linear infinite; }
-@keyframes attendance-marquee { from { transform: translateX(100%); } to { transform: translateX(-100%); } }
-@media (prefers-reduced-motion: reduce) { .attendance-event-banner-track { animation: none; padding-left: 16px; white-space: normal; } }
+.attendance-event-banner {
+    width: 100%;
+    max-width: none;
+    margin: -24px 0 24px;
+    padding: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+    border-top: 1px solid #bfdbfe;
+    border-bottom: 1px solid #bfdbfe;
+    background: #eff6ff;
+    color: #1e3a8a;
+    box-shadow: 0 3px 10px rgba(37, 99, 235, .08);
+}
+
+.attendance-event-banner-track {
+    display: flex;
+    width: max-content;
+    box-sizing: border-box;
+    font-size: clamp(.86rem, 1.5vw, 1rem);
+    font-weight: 800;
+    line-height: 1.65;
+    white-space: nowrap;
+    will-change: transform;
+    animation-name: attendanceTickerMove;
+    animation-duration: var(--attendance-ticker-duration, 24s);
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-play-state: running;
+}
+
+.attendance-event-banner-text {
+    flex-shrink: 0;
+    box-sizing: border-box;
+    padding: 14px clamp(40px, 6vw, 96px) 14px clamp(16px, 4vw, 48px);
+}
+
+@keyframes attendanceTickerMove {
+    from {
+        transform: translate3d(0, 0, 0);
+    }
+
+    to {
+        transform: translate3d(-50%, 0, 0);
+    }
+}
+
+@media (max-width: 640px) {
+    .attendance-event-banner {
+        margin-bottom: 18px;
+    }
+
+    .attendance-event-banner-track {
+        line-height: 1.55;
+    }
+
+    .attendance-event-banner-text {
+        padding: 12px 56px 12px 16px;
+    }
+}
 
 /* AR 예약 테마 - 보라색(PURPLE/INDIGO) 계열 */
 body.theme-ar { background-color: #f5f3ff; }

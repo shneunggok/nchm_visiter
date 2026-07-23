@@ -23,7 +23,6 @@ const TV_CONFIG = {
         "ranking",
         "ar",
         "events",
-        "photos",
         "notices"
     ],
     enabledSlides: {
@@ -32,7 +31,6 @@ const TV_CONFIG = {
         ranking: true,
         ar: true,
         events: true,
-        photos: true,
         notices: true
     }
 };
@@ -46,7 +44,6 @@ let tvSettingsListener = null;
 let visitorListener = null;
 let arListener = null;
 let eventsListener = null;
-let photosListener = null;
 let noticesListener = null;
 let tvLastSettings = {};
 let clockTimer = null;
@@ -74,7 +71,6 @@ function cacheTVDOM() {
     TV_DOM.arCount = document.getElementById("tv-ar-count");
     TV_DOM.arStatus = document.getElementById("tv-ar-status");
     TV_DOM.eventsContainer = document.getElementById("tv-events-container");
-    TV_DOM.photoContainer = document.getElementById("tv-photo-container");
     TV_DOM.noticesContainer = document.getElementById("tv-notices-container");
     TV_DOM.indicator = document.getElementById("tv-indicator");
     TV_DOM.dots = document.querySelectorAll(".tv-dot");
@@ -546,7 +542,7 @@ function renderEvents(events) {
         for (var i = 0; i < keys.length; i++) {
             var event = events[keys[i]];
             if (event && event.enabled !== false) {
-                var startTime = event.startDate ? new Date(event.startDate).getTime() : 0;
+                var startTime = event.startDate ? new Date(event.startDate + "T00:00:00").getTime() : 0;
                 var endTime = event.endDate ? new Date(event.endDate + "T23:59:59").getTime() : Infinity;
 
                 if (startTime <= now && endTime >= now) {
@@ -564,8 +560,16 @@ function renderEvents(events) {
         var html = "";
         for (var j = 0; j < activeEvents.length; j++) {
             var evt = activeEvents[j];
+            var eventImages = Array.isArray(evt.images) ? evt.images : (evt.images && typeof evt.images === "object" ? Object.values(evt.images) : []);
+            if (!eventImages.length && evt.image) eventImages = [{ secure_url: evt.image }];
             html += "<div class='tv-event-card'>";
-            if (evt.image) html += "  <img src='" + escapeHtml(evt.image) + "' alt='' class='tv-event-image'>";
+            if (eventImages.length) {
+                html += "<div class='tv-event-images'>";
+                eventImages.forEach(function(eventImage) {
+                    if (eventImage && eventImage.secure_url) html += "<img src='" + escapeHtml(eventImage.secure_url) + "' alt='' class='tv-event-image'>";
+                });
+                html += "</div>";
+            }
             html += "  <div class='tv-event-title'>" + escapeHtml(evt.title || "이벤트") + "</div>";
             if (evt.description) {
                 html += "  <div class='tv-event-desc'>" + escapeHtml(evt.description) + "</div>";
@@ -591,51 +595,6 @@ function subscribeEvents() {
     });
 }
 
-// ==================== Firebase: Photos ====================
-
-function renderPhotos(photos) {
-        var container = TV_DOM.photoContainer;
-        if (!container) return;
-        if (!photos || typeof photos !== "object") {
-            container.innerHTML = "<div class='tv-photo-empty'>등록된 사진이 없습니다</div>";
-            return;
-        }
-        var photoList = [];
-        var keys = Object.keys(photos);
-        for (var i = 0; i < keys.length; i++) {
-            var photo = photos[keys[i]];
-            if (photo && photo.url) {
-                photoList.push(photo);
-            }
-        }
-
-        if (photoList.length === 0) {
-            container.innerHTML = "<div class='tv-photo-empty'>등록된 사진이 없습니다</div>";
-            return;
-        }
-
-        var image = document.createElement("img");
-        image.src = photoList[0].url;
-        image.alt = "갤러리 사진";
-        image.className = "tv-photo-img";
-        image.onerror = function() {
-            container.innerHTML = "<div class='tv-photo-empty'>사진을 표시할 수 없습니다</div>";
-        };
-        container.replaceChildren(image);
-}
-
-function subscribePhotos() {
-    var photosRef = db.ref("tvContent/photos");
-    if (photosListener) photosListener.off();
-    photosListener = photosRef;
-    photosRef.on("value", function(snapshot) {
-        renderPhotos(snapshot.val());
-    }, function(error) {
-        console.error("[tv] subscribePhotos error:", error);
-        renderContentError(TV_DOM.photoContainer, "사진 연결 오류");
-    });
-}
-
 // ==================== Firebase: Notices ====================
 
 function renderNotices(notices) {
@@ -653,9 +612,9 @@ function renderNotices(notices) {
         var now = Date.now();
         for (var i = 0; i < keys.length; i++) {
             var notice = notices[keys[i]];
-            var start = notice && notice.startDate ? new Date(notice.startDate).getTime() : 0;
+            var start = notice && notice.startDate ? new Date(notice.startDate + "T00:00:00").getTime() : 0;
             var end = notice && notice.endDate ? new Date(notice.endDate + "T23:59:59").getTime() : Infinity;
-            if (notice && (notice.title || notice.image || notice.imageUrl || notice.url) && start <= now && end >= now) {
+            if (notice && notice.enabled !== false && (notice.title || notice.secure_url || notice.image || notice.imageUrl || notice.url) && start <= now && end >= now) {
                 noticeList.push(notice);
             }
         }
@@ -671,10 +630,10 @@ function renderNotices(notices) {
         });
 
         var imageNotice = noticeList.find(function(notice) {
-            return notice && (notice.image || notice.imageUrl || notice.url);
+            return notice && (notice.type === "image" || notice.secure_url || notice.image || notice.imageUrl || notice.url);
         });
         if (imageNotice) {
-            var noticeImage = imageNotice.image || imageNotice.imageUrl || imageNotice.url;
+            var noticeImage = imageNotice.secure_url || imageNotice.image || imageNotice.imageUrl || imageNotice.url;
             container.classList.add("tv-notices-container--fullscreen");
             if (slideContent) slideContent.classList.add("tv-slide-content--fullscreen-notice");
             container.innerHTML = "<figure class='tv-notice-fullscreen'><img src='" + escapeHtml(noticeImage) + "' alt='" + escapeHtml(imageNotice.title || "공지 이미지") + "'></figure>";
@@ -694,6 +653,9 @@ function renderNotices(notices) {
             var notice = noticeList[j];
             html += "<div class='tv-notice-item'>";
             html += "  <div class='tv-notice-title'>" + escapeHtml(notice.title) + "</div>";
+            if (notice.description) {
+                html += "  <div class='tv-notice-description'>" + escapeHtml(notice.description) + "</div>";
+            }
             if (notice.date) {
                 html += "  <div class='tv-notice-date'>" + escapeHtml(notice.date) + "</div>";
             }
@@ -781,7 +743,6 @@ function initializeTV() {
     subscribeTodayVisitors();
     subscribeARStatus();
     subscribeEvents();
-    subscribePhotos();
     subscribeNotices();
 
     // Setup navigation
@@ -831,7 +792,6 @@ window.addEventListener("pagehide", function() {
     if (visitorListener) visitorListener.off();
     if (arListener) arListener.off();
     if (eventsListener) eventsListener.off();
-    if (photosListener) photosListener.off();
     if (noticesListener) noticesListener.off();
     db.ref("tvStatus").set({ online: false, lastSync: firebase.database.ServerValue.TIMESTAMP }).catch(function() {});
 });

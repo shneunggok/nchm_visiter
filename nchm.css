@@ -27,6 +27,34 @@ body.theme-visit { background-color: #f0f7ff; }
 .theme-visit .submit-btn { background-color: #2563eb; box-shadow: 0 8px 15px rgba(37, 99, 235, 0.3); }
 .theme-visit .check-badge { background-color: #fbbf24; color: #1e3a8a; }
 
+.attendance-tab-event-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: 7px;
+    padding: 3px 7px;
+    border: 1px solid #ddd6fe;
+    border-radius: 999px;
+    background: #f5f3ff;
+    color: #6d28d9;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.attendance-tab-event-badge.hidden {
+    display: none;
+}
+
+.attendance-tab-event-dot {
+    width: 5px;
+    height: 5px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #8b5cf6;
+}
+
 .attendance-event-banner {
     width: 100%;
     max-width: none;
@@ -90,6 +118,12 @@ body.theme-visit { background-color: #f0f7ff; }
 /* AR 예약 테마 - 보라색(PURPLE/INDIGO) 계열 */
 body.theme-ar { background-color: #f5f3ff; }
 .theme-ar .gradient-banner { background: linear-gradient(135deg, #6366f1, #a855f7); }
+.theme-ar .attendance-event-banner {
+    border-color: #c4b5fd;
+    background: #f5f3ff;
+    color: #4c1d95;
+    box-shadow: 0 3px 10px rgba(99, 102, 241, .1);
+}
 .theme-ar .choice-btn.active { border-color: #6366f1 !important; background-color: #6366f1 !important; color: white !important; }
 .theme-ar .submit-btn { background-color: #6366f1; box-shadow: 0 8px 15px rgba(99, 102, 241, 0.3); }
 .theme-ar .check-badge { background-color: #fcd34d; color: #312e81; }

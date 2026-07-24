@@ -12,18 +12,31 @@ let arCount = 0;
 let attendanceEventsQuery = null;
 let attendanceEventsState = {};
 let attendanceTickerResizeTimer = null;
+let currentAttendanceBannerType = "visit";
 
-function getActiveAttendanceEvents(events) {
+function getActiveAttendanceEvents(events, type) {
     const today = formatLocalDate(new Date());
-    return Object.values(events || {}).filter((event) => event && event.enabled !== false && event.startDate <= today && (!event.endDate || event.endDate >= today));
+    return Object.values(events || {}).filter((event) => event
+        && event.enabled !== false
+        && event.type === type
+        && event.startDate <= today
+        && (!event.endDate || event.endDate >= today));
+}
+
+function updateAttendanceTabEventBadges(events) {
+    const arBadge = document.getElementById("ar-event-status-badge");
+    if (!arBadge) return;
+    const hasActiveArEvent = getActiveAttendanceEvents(events, "ar").length > 0;
+    arBadge.classList.toggle("hidden", !hasActiveArEvent);
 }
 
 function renderAttendanceEventBanner(events) {
     attendanceEventsState = events || {};
+    updateAttendanceTabEventBadges(attendanceEventsState);
     const banner = document.getElementById("attendance-event-banner");
     const track = document.getElementById("attendance-event-banner-track");
     if (!banner || !track) return;
-    const activeEvents = getActiveAttendanceEvents(events);
+    const activeEvents = getActiveAttendanceEvents(events, currentAttendanceBannerType);
     banner.dataset.hasEvents = activeEvents.length ? "true" : "false";
     if (!activeEvents.length) {
         banner.classList.add("hidden");
@@ -34,7 +47,7 @@ function renderAttendanceEventBanner(events) {
         const icon = event.type === "ar" ? "🎮" : "🎉";
         const typeName = event.type === "ar" ? "AR 출석 이벤트" : "방문 출석 이벤트";
         const criterion = event.criteriaLabel || `${event.criteriaCount || 1}회 이상`;
-        return `${icon} 현재 ${typeName} 「${event.title || "이벤트"}」가 진행중입니다! ${event.startDate} ~ ${event.endDate || "종료일 미정"} · ${criterion} 시 추첨을 통해 ${event.winnerCount || 0}명을 선정합니다. ${event.description || "자세한 내용은 로비 이벤트 안내물을 확인해주세요."} 🎉`;
+        return `${icon} 현재 ${typeName} 「${event.title || "이벤트"}」가 진행중입니다! ${event.startDate} ~ ${event.endDate || "종료일 미정"} · ${criterion} 시 추첨을 통해 ${event.winnerCount || 0}명을 선정합니다. ${event.description || "자세한 내용은 로비 이벤트 안내물을 확인해주세요."} ${icon}`;
     }).join("     ·     ");
 
     // Make each half of the ticker wider than the viewport even when the
@@ -71,9 +84,10 @@ window.addEventListener("resize", () => {
 function updateAttendanceEventBannerVisibility() {
     const banner = document.getElementById("attendance-event-banner");
     if (!banner) return;
-    const visitIsVisible = !dom.sectionVisit.classList.contains("hidden")
+    const targetSection = currentAttendanceBannerType === "ar" ? dom.sectionAr : dom.sectionVisit;
+    const targetIsVisible = !targetSection.classList.contains("hidden")
         && !dom.mainTabs.classList.contains("hidden");
-    banner.classList.toggle("hidden", banner.dataset.hasEvents !== "true" || !visitIsVisible);
+    banner.classList.toggle("hidden", banner.dataset.hasEvents !== "true" || !targetIsVisible);
 }
 
 function subscribeAttendanceEventBanner() {
@@ -113,6 +127,7 @@ function deleteArLog(key) {
 }
 
 function switchTab(type) {
+    currentAttendanceBannerType = type === "ar" ? "ar" : "visit";
     document.getElementById("tab-visit").className = "tab-btn font-bold";
     document.getElementById("tab-ar").className = "tab-btn font-bold";
     dom.mainTabs.classList.remove("hidden");
@@ -130,7 +145,7 @@ function switchTab(type) {
         generateTimeSlots();
         showArNotice();
     }
-    updateAttendanceEventBannerVisibility();
+    renderAttendanceEventBanner(attendanceEventsState);
 }
 
 function switchAdminSubTab(tab) {

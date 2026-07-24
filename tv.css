@@ -20,33 +20,19 @@ html, body {
     overflow: hidden;
     font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     background: var(--tv-background, #0f172a);
-    color: #ffffff;
+    color: var(--tv-text-primary, #ffffff);
+    --tv-text-primary: #ffffff;
+    --tv-text-secondary: #e2e8f0;
+    --tv-text-muted: #cbd5e1;
+    --tv-card-background: rgba(15,23,42,.38);
+    --tv-card-border: rgba(255,255,255,.18);
+    --tv-accent: #93c5fd;
+    --tv-logo-filter: brightness(0) invert(1);
 }
 
 .tv-preview-controls { position: fixed; right: 24px; bottom: 24px; z-index: 20; display: flex; gap: 8px; }
-.tv-preview-controls button { border: 1px solid rgba(255,255,255,.18); border-radius: 10px; padding: 10px 14px; background: rgba(15,23,42,.9); color: white; font-weight: 700; cursor: pointer; }
+.tv-preview-controls button { border: 1px solid var(--tv-card-border); border-radius: 10px; padding: 10px 14px; background: var(--tv-card-background); color: var(--tv-text-primary); font-weight: 700; cursor: pointer; }
 .tv-preview-controls button:hover { background: #4f46e5; }
-[data-tv-theme="light"] .tv-bg-overlay { background: linear-gradient(135deg, #e0f2fe, #f8fafc 55%, #e0e7ff); }
-[data-tv-theme="blue"] .tv-bg-overlay { background: linear-gradient(135deg, #082f6b, #0b3b82 55%, #172554); }
-[data-tv-theme="light"] .tv-section-title,
-[data-tv-theme="light"] .tv-rank-name,
-[data-tv-theme="light"] .tv-event-title,
-[data-tv-theme="light"] .tv-notice-title { color: #0f172a; }
-[data-tv-theme="light"] .tv-subtitle,
-[data-tv-theme="light"] .tv-date,
-[data-tv-theme="light"] .tv-status-text,
-[data-tv-theme="light"] .tv-section-desc,
-[data-tv-theme="light"] .tv-rank-label,
-[data-tv-theme="light"] .tv-event-desc,
-[data-tv-theme="light"] .tv-notice-date,
-[data-tv-theme="light"] .tv-ranking-empty,
-[data-tv-theme="light"] .tv-events-empty,
-[data-tv-theme="light"] .tv-photo-empty,
-[data-tv-theme="light"] .tv-notices-empty { color: #475569; }
-[data-tv-theme="light"] .tv-ranking-item,
-[data-tv-theme="light"] .tv-ar-info-box,
-[data-tv-theme="light"] .tv-event-card,
-[data-tv-theme="light"] .tv-notice-item { background: rgba(255, 255, 255, .76); border-color: rgba(15, 23, 42, .12); }
 
 /* ==================== TV Container ==================== */
 .tv-container {
@@ -68,9 +54,7 @@ html, body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: linear-gradient(135deg, var(--tv-background, #0f172a) 0%, #1e293b 25%, var(--tv-background, #0f172a) 50%, #1a1f35 75%, var(--tv-background, #0f172a) 100%);
-    background-size: 400% 400%;
-    animation: gradientShift 15s ease infinite;
+    background: var(--tv-background, #0f172a);
     z-index: 0;
 }
 
@@ -133,7 +117,7 @@ html, body {
 .tv-logo {
     height: 120px;
     width: auto;
-    filter: brightness(0) invert(1); /* Make logo white for dark bg */
+    filter: var(--tv-logo-filter); /* 배경 밝기에 맞춰 로고도 대비 조정 */
     opacity: 0.9;
 }
 
@@ -141,17 +125,14 @@ html, body {
     font-size: clamp(2.6rem, 4.4vw, 5.3rem);
     font-weight: 900;
     letter-spacing: -0.02em;
-    background: linear-gradient(135deg, #60a5fa, #a78bfa);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--tv-text-primary);
     margin-bottom: 16px;
     line-height: 1.2;
 }
 
 .tv-subtitle {
     font-size: clamp(1.2rem, 1.8vw, 2rem);
-    color: #cbd5e1;
+    color: var(--tv-text-secondary);
     font-weight: 500;
     margin-bottom: 48px;
 }
@@ -164,7 +145,7 @@ html, body {
     font-size: clamp(4.2rem, 9vw, 10rem);
     font-weight: 900;
     letter-spacing: 0.05em;
-    color: #e2e8f0;
+    color: var(--tv-text-primary);
     font-variant-numeric: tabular-nums;
     line-height: 1;
     margin-bottom: 8px;
@@ -173,7 +154,7 @@ html, body {
 
 .tv-date {
     font-size: clamp(1.15rem, 1.8vw, 2rem);
-    color: #cbd5e1;
+    color: var(--tv-text-secondary);
     font-weight: 500;
 }
 
@@ -215,14 +196,14 @@ html, body {
 
 .tv-status-text {
     font-size: 1rem;
-    color: #cbd5e1;
+    color: var(--tv-text-secondary);
     font-weight: 500;
 }
 
 /* ==================== Section Icon ==================== */
 .tv-section-icon {
     margin-bottom: 24px;
-    color: #60a5fa;
+    color: var(--tv-accent);
     opacity: 0.8;
 }
 
@@ -230,7 +211,7 @@ html, body {
 .tv-section-title {
     font-size: clamp(2.4rem, 4vw, 4.5rem);
     font-weight: 900;
-    color: #f1f5f9;
+    color: var(--tv-text-primary);
     margin-bottom: 32px;
     letter-spacing: -0.01em;
 }
@@ -238,7 +219,7 @@ html, body {
 /* ==================== Section Description ==================== */
 .tv-section-desc {
     font-size: clamp(1.05rem, 1.5vw, 1.5rem);
-    color: #cbd5e1;
+    color: var(--tv-text-secondary);
     margin-top: 24px;
     font-weight: 400;
 }
@@ -255,10 +236,7 @@ html, body {
 .tv-visitor-count {
     font-size: clamp(7rem, 16vw, 15rem);
     font-weight: 900;
-    background: linear-gradient(135deg, #60a5fa, #3b82f6);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--tv-accent);
     line-height: 1;
     letter-spacing: -0.02em;
 }
@@ -266,7 +244,7 @@ html, body {
 .tv-visitor-unit {
     font-size: 2.5rem;
     font-weight: 700;
-    color: #94a3b8;
+    color: var(--tv-text-secondary);
 }
 
 /* ==================== Ranking Slide ==================== */
@@ -280,7 +258,7 @@ html, body {
 
 .tv-ranking-empty {
     font-size: 1.5rem;
-    color: #cbd5e1;
+    color: var(--tv-text-muted);
     padding: 40px;
 }
 
@@ -288,8 +266,8 @@ html, body {
     display: flex;
     align-items: center;
     gap: 24px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--tv-card-background);
+    border: 1px solid var(--tv-card-border);
     border-radius: 20px;
     padding: 20px 32px;
     width: 100%;
@@ -320,14 +298,14 @@ html, body {
 }
 
 .tv-rank-1 { color: #fbbf24; text-shadow: 0 0 20px rgba(251, 191, 36, 0.4); }
-.tv-rank-2 { color: #94a3b8; }
+.tv-rank-2 { color: var(--tv-rank-secondary, #cbd5e1); }
 .tv-rank-3 { color: #d97706; }
-.tv-rank-other { color: #64748b; }
+.tv-rank-other { color: var(--tv-rank-other, #94a3b8); }
 
 .tv-rank-name {
     font-size: clamp(1.4rem, 2.3vw, 2rem);
     font-weight: 700;
-    color: #f1f5f9;
+    color: var(--tv-text-primary);
     flex: 1;
     text-align: left;
 }
@@ -335,12 +313,12 @@ html, body {
 .tv-rank-count {
     font-size: 1.8rem;
     font-weight: 900;
-    color: #60a5fa;
+    color: var(--tv-accent);
 }
 
 .tv-rank-label {
     font-size: 1rem;
-    color: #cbd5e1;
+    color: var(--tv-text-secondary);
     font-weight: 500;
 }
 
@@ -357,8 +335,8 @@ html, body {
     flex-direction: column;
     align-items: center;
     gap: 8px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--tv-card-background);
+    border: 1px solid var(--tv-card-border);
     border-radius: 24px;
     padding: 32px 48px;
     min-width: 250px;
@@ -366,43 +344,21 @@ html, body {
 
 .tv-ar-label {
     font-size: 1.2rem;
-    color: #94a3b8;
+    color: var(--tv-text-secondary);
     font-weight: 600;
 }
 
 .tv-ar-count {
     font-size: 5rem;
     font-weight: 900;
-    background: linear-gradient(135deg, #a78bfa, #6366f1);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--tv-accent);
     line-height: 1;
 }
 
 .tv-ar-unit {
     font-size: 1.5rem;
-    color: #94a3b8;
+    color: var(--tv-text-secondary);
     font-weight: 700;
-}
-
-.tv-ar-status-badge {
-    font-size: 1.5rem;
-    font-weight: 800;
-    padding: 8px 24px;
-    border-radius: 40px;
-}
-
-.status-active {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-    border: 1px solid rgba(34, 197, 94, 0.3);
-}
-
-.status-inactive {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 /* ==================== Events Slide ==================== */
@@ -417,13 +373,13 @@ html, body {
 
 .tv-events-empty {
     font-size: 1.5rem;
-    color: #64748b;
+    color: var(--tv-text-muted);
     padding: 40px;
 }
 
 .tv-event-card {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--tv-card-background);
+    border: 1px solid var(--tv-card-border);
     border-radius: 20px;
     padding: 24px 32px;
     width: 100%;
@@ -450,13 +406,13 @@ html, body {
 .tv-event-title {
     font-size: 1.8rem;
     font-weight: 800;
-    color: #f1f5f9;
+    color: var(--tv-text-primary);
     margin-bottom: 8px;
 }
 
 .tv-event-desc {
     font-size: 1.2rem;
-    color: #94a3b8;
+    color: var(--tv-text-secondary);
     line-height: 1.5;
 }
 
@@ -484,7 +440,7 @@ html, body {
 
 .tv-photo-empty {
     font-size: 1.5rem;
-    color: #64748b;
+    color: var(--tv-text-muted);
 }
 
 .tv-photo-img {
@@ -539,13 +495,13 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
 
 .tv-notices-empty {
     font-size: 1.5rem;
-    color: #64748b;
+    color: var(--tv-text-muted);
     padding: 40px;
 }
 
 .tv-notice-item {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--tv-card-background);
+    border: 1px solid var(--tv-card-border);
     border-radius: 16px;
     padding: 20px 28px;
     width: 100%;
@@ -557,20 +513,666 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
 .tv-notice-title {
     font-size: 1.5rem;
     font-weight: 700;
-    color: #f1f5f9;
+    color: var(--tv-text-primary);
     margin-bottom: 4px;
 }
 
 .tv-notice-date {
     font-size: 0.9rem;
-    color: #cbd5e1;
+    color: var(--tv-text-secondary);
 }
 
 .tv-notice-description {
     margin-top: 8px;
     font-size: 1.05rem;
     line-height: 1.6;
-    color: #cbd5e1;
+    color: var(--tv-text-secondary);
+}
+
+/* ==================== Attendance Event Boards ==================== */
+.tv-attendance-slide {
+    background: #f8fafc;
+}
+
+.tv-attendance-board {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    padding: clamp(42px, 4.4vw, 84px) clamp(52px, 6vw, 116px) clamp(88px, 8.5vh, 118px);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: clamp(18px, 2vh, 28px);
+    color: #172033;
+    isolation: isolate;
+}
+
+.tv-attendance-board--visit {
+    background:
+        radial-gradient(circle at 88% 8%, rgba(251, 191, 36, .25), transparent 25%),
+        radial-gradient(circle at 8% 94%, rgba(251, 146, 60, .18), transparent 29%),
+        linear-gradient(145deg, #fffaf0 0%, #fff7df 48%, #fef3c7 100%);
+}
+
+.tv-attendance-board--visit::before {
+    content: "";
+    position: absolute;
+    inset: 22px;
+    z-index: -1;
+    border: 2px solid rgba(180, 83, 9, .15);
+    border-radius: 36px;
+    pointer-events: none;
+}
+
+.tv-attendance-board--visit::after {
+    content: "✓  ·  ✓  ·  ✓";
+    position: absolute;
+    right: 7vw;
+    bottom: 5vh;
+    z-index: -1;
+    color: rgba(180, 83, 9, .07);
+    font-size: 8vw;
+    font-weight: 900;
+    transform: rotate(-8deg);
+}
+
+.tv-attendance-board--ar {
+    color: #eff6ff;
+    background:
+        linear-gradient(rgba(34, 211, 238, .055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(34, 211, 238, .055) 1px, transparent 1px),
+        radial-gradient(circle at 20% 20%, rgba(124, 58, 237, .32), transparent 32%),
+        radial-gradient(circle at 88% 75%, rgba(8, 145, 178, .25), transparent 34%),
+        #07111f;
+    background-size: 56px 56px, 56px 56px, auto, auto, auto;
+}
+
+.tv-attendance-board--ar::before {
+    content: "";
+    position: absolute;
+    inset: 28px;
+    z-index: -1;
+    border: 1px solid rgba(103, 232, 249, .25);
+    clip-path: polygon(0 0, 42% 0, 44% 8px, 78% 8px, 80% 0, 100% 0, 100% 100%, 60% 100%, 58% calc(100% - 8px), 20% calc(100% - 8px), 18% 100%, 0 100%);
+    pointer-events: none;
+}
+
+.tv-attendance-header {
+    width: 100%;
+    min-width: 0;
+}
+
+.tv-attendance-kicker {
+    margin-bottom: 9px;
+    font-size: clamp(.72rem, .8vw, 1rem);
+    font-weight: 900;
+    letter-spacing: .24em;
+    color: #b45309;
+}
+
+.tv-attendance-board--ar .tv-attendance-kicker {
+    color: #67e8f9;
+}
+
+.tv-attendance-heading-row {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 36px;
+}
+
+.tv-attendance-heading-row > div:first-child {
+    min-width: 0;
+}
+
+.tv-attendance-heading-row h2 {
+    font-size: clamp(2.35rem, 3.8vw, 4.6rem);
+    line-height: 1.05;
+    font-weight: 950;
+    letter-spacing: -.045em;
+}
+
+.tv-attendance-board--visit .tv-attendance-heading-row h2 {
+    color: #7c2d12;
+}
+
+.tv-attendance-board--ar .tv-attendance-heading-row h2 {
+    color: #f8fafc;
+    text-shadow: 0 0 28px rgba(34, 211, 238, .18);
+}
+
+.tv-attendance-heading-row p {
+    margin-top: 12px;
+    max-width: 850px;
+    font-size: clamp(1rem, 1.35vw, 1.45rem);
+    line-height: 1.45;
+    font-weight: 650;
+    color: #6b4a2e;
+}
+
+.tv-attendance-board--ar .tv-attendance-heading-row p {
+    color: #b8c8dc;
+}
+
+.tv-attendance-meta {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+    padding-bottom: 4px;
+}
+
+.tv-attendance-meta strong {
+    white-space: nowrap;
+    font-size: clamp(.9rem, 1.1vw, 1.25rem);
+}
+
+.tv-attendance-status {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 8px 18px;
+    font-size: clamp(.85rem, 1vw, 1.1rem);
+    font-weight: 900;
+}
+
+.tv-attendance-board--visit .tv-attendance-status--active {
+    color: #166534;
+    background: #dcfce7;
+    box-shadow: inset 0 0 0 1px #86efac;
+}
+
+.tv-attendance-board--visit .tv-attendance-status--upcoming {
+    color: #92400e;
+    background: #fef3c7;
+    box-shadow: inset 0 0 0 1px #fcd34d;
+}
+
+.tv-attendance-board--visit .tv-attendance-status--ended {
+    color: #475569;
+    background: #f1f5f9;
+    box-shadow: inset 0 0 0 1px #cbd5e1;
+}
+
+.tv-attendance-board--ar .tv-attendance-status {
+    color: #cffafe;
+    background: rgba(8, 145, 178, .18);
+    border: 1px solid rgba(103, 232, 249, .5);
+}
+
+.tv-attendance-ranking {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.tv-visit-podium {
+    display: grid;
+    grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr) minmax(0, .92fr);
+    align-items: end;
+    justify-content: center;
+    gap: clamp(12px, 1.5vw, 28px);
+    width: min(1120px, 100%);
+    margin: 0 auto clamp(18px, 2vh, 28px);
+}
+
+.tv-visit-podium--count-1 {
+    grid-template-columns: minmax(320px, 620px);
+    justify-content: center;
+}
+
+.tv-visit-podium--count-2 {
+    grid-template-columns: repeat(2, minmax(280px, 420px));
+    justify-content: center;
+}
+
+.tv-visit-podium-card {
+    min-width: 0;
+    min-height: clamp(118px, 15vh, 172px);
+    padding: clamp(18px, 2vw, 30px);
+    border: 1px solid rgba(146, 64, 14, .18);
+    border-radius: 26px;
+    background: rgba(255, 255, 255, .78);
+    box-shadow: 0 18px 44px rgba(146, 64, 14, .09);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: clamp(12px, 1.4vw, 24px);
+    animation: attendanceEnter .55s both;
+}
+
+.tv-visit-podium-card.tv-rank-position-1 {
+    min-height: clamp(142px, 18vh, 204px);
+    border-color: rgba(217, 119, 6, .35);
+    background: linear-gradient(145deg, rgba(255,255,255,.94), rgba(254, 243, 199, .96));
+    box-shadow: 0 22px 55px rgba(180, 83, 9, .17);
+}
+
+.tv-visit-medal {
+    width: clamp(48px, 4vw, 72px);
+    height: clamp(48px, 4vw, 72px);
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    background: #ea580c;
+    font-size: clamp(1.25rem, 1.8vw, 2rem);
+    font-weight: 950;
+}
+
+.tv-rank-position-1 .tv-visit-medal {
+    background: linear-gradient(145deg, #f59e0b, #d97706);
+}
+
+.tv-visit-podium-card small {
+    display: block;
+    color: #9a5b2e;
+    font-size: clamp(.85rem, 1vw, 1.1rem);
+    font-weight: 900;
+}
+
+.tv-visit-podium-main {
+    min-width: 0;
+}
+
+.tv-visit-podium-person {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: clamp(10px, 1vw, 18px);
+}
+
+.tv-visit-podium-card strong {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #431407;
+    font-size: clamp(1.45rem, 2vw, 2.4rem);
+    font-weight: 950;
+}
+
+.tv-visit-podium-card b,
+.tv-visit-ranking-list b {
+    color: #c2410c;
+    font-size: clamp(1.65rem, 2.3vw, 2.7rem);
+    white-space: nowrap;
+}
+
+.tv-visit-podium-person > b {
+    flex: 0 0 auto;
+    font-size: clamp(1.35rem, 1.9vw, 2.25rem);
+}
+
+.tv-visit-podium-card em,
+.tv-visit-ranking-list em,
+.tv-ar-ranking-layout em {
+    margin-left: 4px;
+    font-size: .48em;
+    font-style: normal;
+}
+
+.tv-visit-ranking-list {
+    width: min(1380px, 100%);
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: clamp(9px, 1vh, 14px) clamp(16px, 1.5vw, 28px);
+}
+
+.tv-visit-ranking-list li {
+    min-width: 0;
+    min-height: clamp(62px, 7.2vh, 82px);
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 18px;
+    padding: 11px 22px;
+    border-radius: 18px;
+    border: 1px solid rgba(146, 64, 14, .14);
+    background: rgba(255, 255, 255, .7);
+    animation: attendanceEnter .45s both;
+}
+
+.tv-attendance-rank-number {
+    min-width: 2.1em;
+    color: #9a3412;
+    font-size: clamp(1.2rem, 1.5vw, 1.7rem);
+    font-weight: 950;
+}
+
+.tv-visit-ranking-list strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #431407;
+    font-size: clamp(1.2rem, 1.55vw, 1.8rem);
+}
+
+.tv-visit-ranking-list b {
+    font-size: clamp(1.2rem, 1.55vw, 1.8rem);
+}
+
+.tv-ar-ranking-layout {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(300px, .78fr) minmax(600px, 1.65fr);
+    gap: clamp(24px, 3vw, 60px);
+    align-items: stretch;
+}
+
+.tv-ar-champion {
+    position: relative;
+    overflow: hidden;
+    min-height: 0;
+    padding: clamp(28px, 3vw, 58px);
+    border: 1px solid rgba(103, 232, 249, .5);
+    border-radius: 18px 58px 18px 58px;
+    background: linear-gradient(145deg, rgba(30, 41, 59, .85), rgba(76, 29, 149, .38));
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    box-shadow: inset 0 0 45px rgba(34, 211, 238, .07), 0 30px 70px rgba(0, 0, 0, .25);
+    animation: attendanceEnter .55s both;
+}
+
+.tv-ar-orbit {
+    position: absolute;
+    width: min(22vw, 350px);
+    aspect-ratio: 1;
+    top: 8%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 1px solid rgba(103, 232, 249, .35);
+    border-radius: 50%;
+    box-shadow: 0 0 0 34px rgba(103, 232, 249, .035), 0 0 0 68px rgba(167, 139, 250, .025);
+}
+
+.tv-ar-orbit::after {
+    content: "";
+    position: absolute;
+    inset: 18%;
+    border: 2px dashed rgba(167, 139, 250, .42);
+    border-radius: 50%;
+    animation: attendanceOrbit 18s linear infinite;
+}
+
+.tv-ar-champion-label {
+    color: #67e8f9;
+    font-size: clamp(.82rem, 1vw, 1.05rem);
+    font-weight: 900;
+    letter-spacing: .16em;
+}
+
+.tv-ar-champion > strong {
+    position: relative;
+    margin-top: 10px;
+    font-size: clamp(2.6rem, 4.2vw, 5.2rem);
+    line-height: 1;
+    font-weight: 950;
+}
+
+.tv-ar-champion > b {
+    margin-top: 20px;
+    color: #c4b5fd;
+    font-size: clamp(2.3rem, 3.6vw, 4.2rem);
+}
+
+.tv-ar-ranking-grid {
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: clamp(10px, 1.4vh, 18px);
+}
+
+.tv-ar-ranking-grid li {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: clamp(12px, 1.4vw, 24px);
+    padding: clamp(13px, 1.55vh, 22px) clamp(16px, 1.6vw, 28px);
+    border-left: 3px solid rgba(34, 211, 238, .42);
+    background: linear-gradient(90deg, rgba(15, 23, 42, .88), rgba(30, 41, 59, .62));
+    clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+    animation: attendanceScanIn .5s both;
+}
+
+.tv-ar-ranking-grid li.tv-ar-top-rank {
+    border-left-color: #a78bfa;
+    background: linear-gradient(90deg, rgba(76, 29, 149, .62), rgba(15, 23, 42, .82));
+}
+
+.tv-ar-ranking-grid li > span {
+    color: #67e8f9;
+    font-size: clamp(1rem, 1.35vw, 1.5rem);
+    font-weight: 950;
+    font-variant-numeric: tabular-nums;
+}
+
+.tv-ar-ranking-grid .tv-attendance-name-cell > strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: clamp(1.25rem, 1.75vw, 2rem);
+    font-weight: 850;
+}
+
+.tv-ar-ranking-grid li > b {
+    color: #c4b5fd;
+    font-size: clamp(1.25rem, 1.7vw, 1.9rem);
+    white-space: nowrap;
+}
+
+.tv-attendance-name-cell {
+    min-width: 0;
+}
+
+.tv-attendance-goal-badge {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    margin-top: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: clamp(.62rem, .72vw, .82rem);
+    font-weight: 900;
+    line-height: 1.25;
+    letter-spacing: 0;
+}
+
+.tv-attendance-board--visit .tv-attendance-goal-badge {
+    color: #9a3412;
+}
+
+.tv-attendance-board--ar .tv-attendance-goal-badge {
+    color: #fbbf24;
+    text-shadow: 0 0 12px rgba(251, 191, 36, .24);
+}
+
+.tv-ar-champion > .tv-attendance-goal-badge {
+    position: relative;
+    margin-top: 12px;
+    font-size: clamp(.72rem, .86vw, .95rem);
+}
+
+.tv-attendance-footer {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: clamp(16px, 1.8vw, 32px);
+    font-size: clamp(.78rem, .9vw, 1rem);
+    font-weight: 700;
+}
+
+.tv-attendance-brand-logo {
+    display: block;
+    width: auto;
+    height: clamp(28px, 3.2vw, 48px);
+    max-width: clamp(125px, 13vw, 210px);
+    object-fit: contain;
+    object-position: left center;
+}
+
+.tv-attendance-footer > strong {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.tv-attendance-board--visit .tv-attendance-footer {
+    color: #7c4a28;
+}
+
+.tv-attendance-board--ar .tv-attendance-footer {
+    color: #94a3b8;
+}
+
+.tv-attendance-board--ar .tv-attendance-brand-logo {
+    filter: brightness(0) invert(1);
+    opacity: .9;
+}
+
+.tv-attendance-ticker {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: clamp(48px, 5.6vh, 62px);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    color: #f8fafc;
+    background: rgba(7, 17, 31, .94);
+    border-top: 1px solid rgba(255, 255, 255, .14);
+    box-shadow: 0 -10px 30px rgba(15, 23, 42, .12);
+    white-space: nowrap;
+    z-index: 5;
+}
+
+.tv-attendance-ticker-track {
+    width: max-content;
+    display: flex;
+    align-items: center;
+    animation: attendanceTickerMove var(--tv-attendance-ticker-duration, 28s) linear infinite;
+    will-change: transform;
+}
+
+.tv-attendance-ticker-group {
+    min-width: 100vw;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    gap: clamp(34px, 4vw, 76px);
+    padding: 0 clamp(44px, 5vw, 96px);
+}
+
+.tv-attendance-ticker-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    font-size: clamp(.95rem, 1.18vw, 1.3rem);
+    font-weight: 750;
+}
+
+.tv-attendance-ticker-badge {
+    flex: 0 0 auto;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: .82em;
+    font-weight: 950;
+}
+
+.tv-attendance-ticker-badge--visit {
+    color: #431407;
+    background: #fdba74;
+}
+
+.tv-attendance-ticker-badge--ar {
+    color: #ecfeff;
+    background: linear-gradient(135deg, #7c3aed, #0891b2);
+}
+
+.tv-attendance-ticker-separator {
+    color: #64748b;
+    font-size: 1.1rem;
+}
+
+.tv-attendance-ticker-separator--loop {
+    margin-inline: clamp(24px, 3vw, 56px);
+}
+
+@keyframes attendanceTickerMove {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+}
+
+.tv-attendance-empty,
+.tv-attendance-loading {
+    height: 100%;
+    min-height: 360px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.tv-attendance-empty > span {
+    width: 96px;
+    height: 96px;
+    margin-bottom: 24px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    border: 2px solid currentColor;
+    font-size: 2.8rem;
+    font-weight: 900;
+    opacity: .72;
+}
+
+.tv-attendance-empty h2 {
+    font-size: clamp(2rem, 3.4vw, 4rem);
+    font-weight: 950;
+}
+
+.tv-attendance-empty p,
+.tv-attendance-loading p {
+    margin-top: 14px;
+    font-size: clamp(1rem, 1.5vw, 1.5rem);
+    opacity: .72;
+}
+
+.tv-attendance-loading span {
+    width: 64px;
+    height: 64px;
+    border: 6px solid rgba(148, 163, 184, .25);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: attendanceOrbit 1s linear infinite;
+}
+
+@keyframes attendanceEnter {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes attendanceScanIn {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes attendanceOrbit {
+    to { transform: rotate(360deg); }
 }
 
 /* ==================== Slide Indicator Dots ==================== */
@@ -588,7 +1190,7 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     width: 14px;
     height: 14px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.2);
+    background: var(--tv-card-border);
     transition: all 0.3s ease;
     cursor: pointer;
     border: 0;
@@ -602,7 +1204,7 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
 }
 
 .tv-dot.active-dot {
-    background: #60a5fa;
+    background: var(--tv-accent);
     box-shadow: 0 0 12px rgba(96, 165, 250, 0.5);
     width: 32px;
     border-radius: 8px;
@@ -633,6 +1235,30 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     .tv-ranking-item { max-width: 90%; }
     .tv-ar-info-box { min-width: 180px; padding: 24px; }
     .tv-ar-count { font-size: 3.5rem; }
+    .tv-attendance-board {
+        padding: 34px 38px 82px;
+    }
+    .tv-attendance-footer {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+    .tv-attendance-footer > strong {
+        grid-column: 2;
+        text-align: left;
+    }
+    .tv-attendance-heading-row {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 14px;
+    }
+    .tv-attendance-meta {
+        align-items: flex-start;
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+    .tv-ar-ranking-layout {
+        grid-template-columns: .75fr 1.5fr;
+        gap: 18px;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -640,7 +1266,13 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     .status-connecting,
     .tv-ranking-item,
     .tv-event-card,
-    .tv-notice-item { animation: none; }
+    .tv-notice-item,
+    .tv-visit-podium-card,
+    .tv-visit-ranking-list li,
+    .tv-ar-champion,
+    .tv-ar-ranking-grid li,
+    .tv-ar-orbit::after,
+    .tv-attendance-loading span { animation: none; }
 
     .tv-slide,
     .tv-photo-img,

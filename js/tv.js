@@ -20,7 +20,8 @@ const TV_CONFIG = {
     slideOrder: [
         "welcome",
         "visitors",
-        "ranking",
+        "attendanceVisit",
+        "attendanceAr",
         "ar",
         "events",
         "notices"
@@ -28,7 +29,8 @@ const TV_CONFIG = {
     enabledSlides: {
         welcome: true,   // Welcome is always shown
         visitors: true,
-        ranking: true,
+        attendanceVisit: true,
+        attendanceAr: true,
         ar: true,
         events: true,
         notices: true
@@ -51,7 +53,8 @@ let resumeTimer = null;
 let statusTimer = null;
 let navigationBound = false;
 let tvDestroyed = false;
-let lastRankingLoadAt = 0;
+let tvRealtimeSubscribed = false;
+let tvAuthStateUnsubscribe = null;
 
 // ==================== Firebase Refs ====================
 const tvSettingsRef = db.ref("tvSettings");
@@ -67,9 +70,9 @@ function cacheTVDOM() {
     TV_DOM.connectionStatus = document.getElementById("tv-connection-status");
     TV_DOM.statusText = document.getElementById("tv-status-text");
     TV_DOM.todayCount = document.getElementById("tv-today-count");
-    TV_DOM.rankingList = document.getElementById("tv-ranking-list");
+    TV_DOM.attendanceVisitBoard = document.getElementById("tv-attendance-visit-board");
+    TV_DOM.attendanceArBoard = document.getElementById("tv-attendance-ar-board");
     TV_DOM.arCount = document.getElementById("tv-ar-count");
-    TV_DOM.arStatus = document.getElementById("tv-ar-status");
     TV_DOM.eventsContainer = document.getElementById("tv-events-container");
     TV_DOM.noticesContainer = document.getElementById("tv-notices-container");
     TV_DOM.indicator = document.getElementById("tv-indicator");
@@ -242,12 +245,6 @@ function refreshSlideContent(slideId) {
     switch (slideId) {
         case "visitors":
             break;
-        case "ranking":
-            if (Date.now() - lastRankingLoadAt > 300000) {
-                lastRankingLoadAt = Date.now();
-                loadAttendanceRanking();
-            }
-            break;
         case "ar":
             loadARStatus();
             break;
@@ -279,6 +276,11 @@ function subscribeTVSettings() {
             var validSlides = settings.slides.filter(function(slide) {
                 return slide && typeof slide.id === "string" && TV_DOM.slideMap[slide.id.split("-")[0]];
             });
+            ["attendanceVisit", "attendanceAr"].forEach(function(id) {
+                if (!validSlides.some(function(slide) { return slide.id.split("-")[0] === id; })) {
+                    validSlides.push({ id: id, enabled: true, duration: 15 });
+                }
+            });
             if (validSlides.length) {
                 TV_CONFIG.slideOrder = validSlides.map(function(slide) { return slide.id; });
                 TV_CONFIG.enabledSlides = {};
@@ -298,6 +300,7 @@ function subscribeTVSettings() {
         // Update slide interval if configured
         if (Number(settings.slideInterval) >= 3000) TV_CONFIG.slideInterval = Number(settings.slideInterval);
         applyTVAppearance(settings);
+        if (typeof setAttendanceSlidePreferences === "function") setAttendanceSlidePreferences(settings);
 
         setConnectionStatus("connected", "Firebase 연결됨");
         if (tvInitialized) startSlideshow();
@@ -307,15 +310,62 @@ function subscribeTVSettings() {
     });
 }
 
+function tvParseBackgroundColor(color) {
+    var value = String(color || "").trim();
+    var hex = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (hex) {
+        var raw = hex[1];
+        if (raw.length === 3) raw = raw.split("").map(function(char) { return char + char; }).join("");
+        return { r: parseInt(raw.slice(0, 2), 16), g: parseInt(raw.slice(2, 4), 16), b: parseInt(raw.slice(4, 6), 16) };
+    }
+    var rgb = value.match(/^rgba?\(\s*([\d.]+)[,\s]+\s*([\d.]+)[,\s]+\s*([\d.]+)/i);
+    if (rgb) return { r: Math.min(255, Number(rgb[1])), g: Math.min(255, Number(rgb[2])), b: Math.min(255, Number(rgb[3])) };
+    return null;
+}
+
+function tvRelativeLuminance(color) {
+    var rgb = tvParseBackgroundColor(color);
+    if (!rgb) return 0;
+    return [rgb.r, rgb.g, rgb.b].map(function(channel) {
+        channel /= 255;
+        return channel <= 0.04045 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4);
+    }).reduce(function(total, channel, index) {
+        return total + channel * [0.2126, 0.7152, 0.0722][index];
+    }, 0);
+}
+
+function getContrastTextColor(backgroundColor) {
+    return tvRelativeLuminance(backgroundColor) > 0.42 ? "#111111" : "#ffffff";
+}
+
 function applyTVAppearance(settings) {
     var root = document.documentElement;
     var theme = settings.theme || "dark";
     document.body.dataset.tvTheme = theme;
     var bg = settings.background || {};
-    if (bg.color) root.style.setProperty("--tv-background", bg.color);
+    var fallbackColor = theme === "light" ? "#f8fafc" : (theme === "blue" ? "#082f6b" : "#0f172a");
+    // 이전 데이터에는 테마가 light여도 기본 다크 색상(#0f172a)이 함께
+    // 저장되어 있을 수 있다. 이 경우 기존 라이트 테마의 의도를 보존한다.
+    var savedColor = String(bg.color || "").toLowerCase();
+    var backgroundColor = (!savedColor || (theme !== "dark" && savedColor === "#0f172a")) ? fallbackColor : bg.color;
+    var hasImageBackground = Boolean(bg.image);
+    var textColor = hasImageBackground ? "#ffffff" : getContrastTextColor(backgroundColor);
+    var isLightBackground = textColor === "#111111";
+    root.style.setProperty("--tv-background", backgroundColor);
+    root.style.setProperty("--tv-text-primary", textColor);
+    root.style.setProperty("--tv-text-secondary", isLightBackground ? "#334155" : "#e2e8f0");
+    root.style.setProperty("--tv-text-muted", isLightBackground ? "#475569" : "#cbd5e1");
+    root.style.setProperty("--tv-card-background", isLightBackground ? "rgba(255,255,255,.82)" : "rgba(15,23,42,.38)");
+    root.style.setProperty("--tv-card-border", isLightBackground ? "rgba(15,23,42,.16)" : "rgba(255,255,255,.18)");
+    root.style.setProperty("--tv-accent", isLightBackground ? "#1d4ed8" : "#93c5fd");
+    root.style.setProperty("--tv-rank-secondary", isLightBackground ? "#334155" : "#cbd5e1");
+    root.style.setProperty("--tv-rank-other", isLightBackground ? "#475569" : "#94a3b8");
+    root.style.setProperty("--tv-logo-filter", isLightBackground ? "none" : "brightness(0) invert(1)");
+    document.body.dataset.tvImageBackground = hasImageBackground ? "true" : "false";
     var overlay = document.querySelector(".tv-bg-overlay");
     if (overlay) {
-        overlay.style.backgroundImage = bg.image ? "linear-gradient(rgba(15,23,42,.65),rgba(15,23,42,.65)),url('" + String(bg.image).replace(/'/g, "%27") + "')" : "";
+        var nextBackgroundImage = bg.image ? "linear-gradient(rgba(2,6,23,.64),rgba(2,6,23,.64)),url('" + String(bg.image).replace(/'/g, "%27") + "')" : "";
+        if (overlay.style.backgroundImage !== nextBackgroundImage) overlay.style.backgroundImage = nextBackgroundImage;
     }
     var welcome = settings.welcome || {};
     var title = document.querySelector(".tv-title");
@@ -323,7 +373,7 @@ function applyTVAppearance(settings) {
     var logo = document.querySelector(".tv-logo");
     if (title && welcome.title) title.textContent = welcome.title;
     if (subtitle && welcome.subtitle) subtitle.textContent = welcome.subtitle;
-    if (logo && welcome.logo) logo.src = welcome.logo;
+    if (logo && welcome.logo && logo.getAttribute("src") !== welcome.logo) logo.src = welcome.logo;
 }
 
 // ==================== Firebase: Today's Visitors ====================
@@ -479,33 +529,8 @@ function loadARStatus() {
         var count = snapshot.numChildren();
         if (TV_DOM.arCount) TV_DOM.arCount.textContent = count;
 
-        // Check if AR is currently active (within operating hours)
-        var now = new Date();
-        var hour = now.getHours();
-        var day = now.getDay();
-        var isWeekend = day === 0 || day === 6;
-        var isOperating = false;
-
-        if (isWeekend) {
-            isOperating = hour >= 10 && hour < 18;
-        } else {
-            isOperating = hour >= 10 && hour < 21;
-        }
-
-        if (!TV_DOM.arStatus) return;
-        if (isOperating) {
-            TV_DOM.arStatus.textContent = "운영 중";
-            TV_DOM.arStatus.className = "tv-ar-status-badge status-active";
-        } else {
-            TV_DOM.arStatus.textContent = "운영 종료";
-            TV_DOM.arStatus.className = "tv-ar-status-badge status-inactive";
-        }
     }).catch(function(error) {
         console.error("[tv] loadARStatus error:", error);
-        if (TV_DOM.arStatus) {
-            TV_DOM.arStatus.textContent = "확인 불가";
-            TV_DOM.arStatus.className = "tv-ar-status-badge status-inactive";
-        }
     });
 }
 
@@ -532,6 +557,8 @@ function renderEvents(events) {
     var container = TV_DOM.eventsContainer;
     if (!container) return;
     if (!events || typeof events !== "object") {
+        if (container.dataset.renderSignature === "empty") return;
+        container.dataset.renderSignature = "empty";
         container.innerHTML = "<div class='tv-events-empty'>진행 중인 이벤트가 없습니다</div>";
         return;
     }
@@ -552,11 +579,54 @@ function renderEvents(events) {
         }
 
         if (activeEvents.length === 0) {
+            if (container.dataset.renderSignature === "empty") return;
+            container.dataset.renderSignature = "empty";
             container.innerHTML = "<div class='tv-events-empty'>진행 중인 이벤트가 없습니다</div>";
             return;
         }
 
         activeEvents.sort(function(a, b) { return (b.priority || 0) - (a.priority || 0); });
+        var eventRenderSignature = JSON.stringify(activeEvents.map(function(event) {
+            var images = Array.isArray(event.images) ? event.images : (event.images && typeof event.images === "object" ? Object.values(event.images) : []);
+            if (!images.length && event.image) images = [{ secure_url: event.image }];
+            return {
+                title: event.title || "",
+                description: event.description || "",
+                images: images.map(function(image) { return image && image.secure_url ? image.secure_url : ""; })
+            };
+        }));
+        if (container.dataset.renderSignature === eventRenderSignature) return;
+        var eventImageSignature = JSON.stringify(activeEvents.map(function(event) {
+            var images = Array.isArray(event.images) ? event.images : (event.images && typeof event.images === "object" ? Object.values(event.images) : []);
+            if (!images.length && event.image) images = [{ secure_url: event.image }];
+            return images.map(function(image) { return image && image.secure_url ? image.secure_url : ""; });
+        }));
+        if (container.dataset.imageSignature === eventImageSignature) {
+            var existingCards = container.querySelectorAll(".tv-event-card");
+            if (existingCards.length === activeEvents.length) {
+                activeEvents.forEach(function(event, index) {
+                    var card = existingCards[index];
+                    var title = card.querySelector(".tv-event-title");
+                    var description = card.querySelector(".tv-event-desc");
+                    if (title) title.textContent = event.title || "이벤트";
+                    if (event.description) {
+                        if (!description) {
+                            description = document.createElement("div");
+                            description.className = "tv-event-desc";
+                            card.appendChild(description);
+                        }
+                        description.textContent = event.description;
+                    } else if (description) {
+                        description.remove();
+                    }
+                });
+                container.dataset.renderSignature = eventRenderSignature;
+                return;
+            }
+        }
+        container.dataset.renderSignature = eventRenderSignature;
+        container.dataset.imageSignature = eventImageSignature;
+
         var html = "";
         for (var j = 0; j < activeEvents.length; j++) {
             var evt = activeEvents[j];
@@ -600,10 +670,12 @@ function subscribeEvents() {
 function renderNotices(notices) {
         var container = TV_DOM.noticesContainer;
         if (!container) return;
-        container.classList.remove("tv-notices-container--fullscreen");
         var slideContent = container.closest(".tv-slide-content");
-        if (slideContent) slideContent.classList.remove("tv-slide-content--fullscreen-notice");
         if (!notices || typeof notices !== "object") {
+            if (container.dataset.renderSignature === "empty") return;
+            container.dataset.renderSignature = "empty";
+            container.classList.remove("tv-notices-container--fullscreen");
+            if (slideContent) slideContent.classList.remove("tv-slide-content--fullscreen-notice");
             container.innerHTML = "<div class='tv-notices-empty'>공지사항이 없습니다</div>";
             return;
         }
@@ -620,6 +692,10 @@ function renderNotices(notices) {
         }
 
         if (noticeList.length === 0) {
+            if (container.dataset.renderSignature === "empty") return;
+            container.dataset.renderSignature = "empty";
+            container.classList.remove("tv-notices-container--fullscreen");
+            if (slideContent) slideContent.classList.remove("tv-slide-content--fullscreen-notice");
             container.innerHTML = "<div class='tv-notices-empty'>공지사항이 없습니다</div>";
             return;
         }
@@ -634,6 +710,9 @@ function renderNotices(notices) {
         });
         if (imageNotice) {
             var noticeImage = imageNotice.secure_url || imageNotice.image || imageNotice.imageUrl || imageNotice.url;
+            var imageNoticeSignature = "image:" + noticeImage;
+            if (container.dataset.renderSignature === imageNoticeSignature) return;
+            container.dataset.renderSignature = imageNoticeSignature;
             container.classList.add("tv-notices-container--fullscreen");
             if (slideContent) slideContent.classList.add("tv-slide-content--fullscreen-notice");
             container.innerHTML = "<figure class='tv-notice-fullscreen'><img src='" + escapeHtml(noticeImage) + "' alt='" + escapeHtml(imageNotice.title || "공지 이미지") + "'></figure>";
@@ -646,6 +725,14 @@ function renderNotices(notices) {
             }
             return;
         }
+
+        var textNoticeSignature = "text:" + JSON.stringify(noticeList.slice(0, 5).map(function(notice) {
+            return { title: notice.title || "", description: notice.description || "", date: notice.date || "" };
+        }));
+        if (container.dataset.renderSignature === textNoticeSignature) return;
+        container.dataset.renderSignature = textNoticeSignature;
+        container.classList.remove("tv-notices-container--fullscreen");
+        if (slideContent) slideContent.classList.remove("tv-slide-content--fullscreen-notice");
 
         var html = "";
         var maxNotices = Math.min(noticeList.length, 5); // Show max 5 notices
@@ -725,6 +812,19 @@ function setupKeyboardShortcuts() {
 
 // ==================== Initialize TV ====================
 
+function subscribeTvRealtimeData() {
+    if (tvRealtimeSubscribed || tvDestroyed) return;
+    tvRealtimeSubscribed = true;
+    subscribeTVSettings();
+    subscribeTodayVisitors();
+    subscribeARStatus();
+    if (typeof subscribeAttendanceBoards === "function") {
+        subscribeAttendanceBoards();
+    }
+    subscribeEvents();
+    subscribeNotices();
+}
+
 function initializeTV() {
     if (tvInitialized) return;
     cacheTVDOM();
@@ -736,15 +836,6 @@ function initializeTV() {
     // Set connection status to connecting
     setConnectionStatus("connecting", "Firebase 연결 중...");
 
-    // Subscribe to Firebase TV settings
-    subscribeTVSettings();
-
-    // Subscribe to real-time data
-    subscribeTodayVisitors();
-    subscribeARStatus();
-    subscribeEvents();
-    subscribeNotices();
-
     // Setup navigation
     setupDotNavigation();
     setupKeyboardShortcuts();
@@ -754,15 +845,22 @@ function initializeTV() {
     startSlideshow();
     tvInitialized = true;
 
-    // Re-check connection after auth
-    auth.signInAnonymously()
-        .then(function() {
+    // Restore a persisted administrator session before attaching protected
+    // visit-log listeners. Only use anonymous auth when no session exists.
+    tvAuthStateUnsubscribe = auth.onAuthStateChanged(function(user) {
+        if (user) {
+            subscribeTvRealtimeData();
             setConnectionStatus("connected", "Firebase 연결됨");
-        })
-        .catch(function(e) {
+            return;
+        }
+        auth.signInAnonymously().catch(function(e) {
             console.error("[tv] auth error:", e);
             setConnectionStatus("error", "인증 오류");
         });
+    }, function(error) {
+        console.error("[tv] auth state error:", error && (error.code || error.message));
+        setConnectionStatus("error", "인증 상태 확인 오류");
+    });
 }
 
 function setupPreviewControls() {
@@ -788,9 +886,11 @@ window.addEventListener("pagehide", function() {
     window.clearTimeout(resumeTimer);
     window.clearTimeout(statusTimer);
     window.clearInterval(clockTimer);
+    if (tvAuthStateUnsubscribe) tvAuthStateUnsubscribe();
     if (tvSettingsListener) tvSettingsListener.off();
     if (visitorListener) visitorListener.off();
     if (arListener) arListener.off();
+    if (typeof unsubscribeAttendanceBoards === "function") unsubscribeAttendanceBoards();
     if (eventsListener) eventsListener.off();
     if (noticesListener) noticesListener.off();
     db.ref("tvStatus").set({ online: false, lastSync: firebase.database.ServerValue.TIMESTAMP }).catch(function() {});

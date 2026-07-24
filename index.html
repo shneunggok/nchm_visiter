@@ -55,7 +55,13 @@
         <button onclick="switchTab('visit')" id="tab-visit" class="tab-btn active-visit font-bold">방문 등록</button>
         
         <!-- AR 예약 탭 -->
-        <button onclick="switchTab('ar')" id="tab-ar" class="tab-btn font-bold">AR 예약</button>
+        <button onclick="switchTab('ar')" id="tab-ar" class="tab-btn font-bold">
+            AR 예약
+            <span id="ar-event-status-badge" class="attendance-tab-event-badge hidden">
+                <span class="attendance-tab-event-dot" aria-hidden="true"></span>
+                이벤트 진행 중
+            </span>
+        </button>
     </div>
 
     <!-- ==================== 관리자 탭 메뉴 (관리자 모드에서만 표시) ==================== -->

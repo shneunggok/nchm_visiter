@@ -7,7 +7,7 @@ const firebaseConfig = {
     appId: "1:592225829882:web:92942c947bbc498926da43",
     measurementId: "G-W0YLVVCQ9R"
 };
-
+// 위 코드와 아래코드 전부 절대 수정하지 마십시오 코드 자체가 먹통됩니다.... !!!
 const ADMIN_EMAIL = "shneunggok@gmail.com";
 const CLOUDINARY_CONFIG = Object.freeze({
     cloudName: "jywxsoly",
@@ -27,3 +27,4 @@ const AGE_GROUPS = [
 ];
 
 const PURPOSES = ["휴식", "독서", "보드게임", "탁구", "스터디룸"];
+

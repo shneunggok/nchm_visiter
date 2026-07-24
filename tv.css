@@ -97,7 +97,8 @@ html, body {
     position: relative;
 }
 
-.tv-slide-content--fullscreen-notice {
+.tv-slide-content--fullscreen-notice,
+.tv-slide-content--fullscreen-event {
     width: 100vw;
     height: 100vh;
     max-height: none;
@@ -105,7 +106,9 @@ html, body {
 }
 
 .tv-slide-content--fullscreen-notice .tv-section-icon,
-.tv-slide-content--fullscreen-notice .tv-section-title {
+.tv-slide-content--fullscreen-notice .tv-section-title,
+.tv-slide-content--fullscreen-event .tv-section-icon,
+.tv-slide-content--fullscreen-event .tv-section-title {
     display: none;
 }
 
@@ -369,6 +372,51 @@ html, body {
     gap: 20px;
     max-width: 700px;
     margin: 0 auto;
+}
+
+.tv-events-container--fullscreen {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    display: block;
+}
+
+.tv-event-fullscreen,
+.tv-event-fullscreen-frame {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: #020617;
+}
+
+.tv-event-fullscreen-frame {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .6s ease;
+}
+
+.tv-event-fullscreen-frame.is-active {
+    opacity: 1;
+}
+
+.tv-event-fullscreen-frame img {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
+}
+
+body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-bg-overlay,
+body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-indicator,
+body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-preview-controls {
+    display: none;
 }
 
 .tv-events-empty {

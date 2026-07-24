@@ -47,6 +47,8 @@ let visitorListener = null;
 let arListener = null;
 let eventsListener = null;
 let noticesListener = null;
+let eventImageTimer = null;
+let eventImageIndex = 0;
 let tvLastSettings = {};
 let clockTimer = null;
 let resumeTimer = null;
@@ -553,12 +555,47 @@ function subscribeARStatus() {
 
 // ==================== Firebase: Events ====================
 
+function stopEventImageRotation() {
+    if (eventImageTimer) {
+        window.clearInterval(eventImageTimer);
+        eventImageTimer = null;
+    }
+}
+
+function showEventFullscreenImage(container, index) {
+    var frames = container.querySelectorAll(".tv-event-fullscreen-frame");
+    if (!frames.length) return;
+    eventImageIndex = ((index % frames.length) + frames.length) % frames.length;
+    frames.forEach(function(frame, frameIndex) {
+        frame.classList.toggle("is-active", frameIndex === eventImageIndex);
+    });
+}
+
+function startEventImageRotation(container) {
+    stopEventImageRotation();
+    var frames = container.querySelectorAll(".tv-event-fullscreen-frame");
+    eventImageIndex = 0;
+    showEventFullscreenImage(container, eventImageIndex);
+    if (frames.length < 2) return;
+    eventImageTimer = window.setInterval(function() {
+        showEventFullscreenImage(container, eventImageIndex + 1);
+    }, 6000);
+}
+
+function leaveEventFullscreenMode(container, slideContent) {
+    stopEventImageRotation();
+    container.classList.remove("tv-events-container--fullscreen");
+    if (slideContent) slideContent.classList.remove("tv-slide-content--fullscreen-event");
+}
+
 function renderEvents(events) {
     var container = TV_DOM.eventsContainer;
     if (!container) return;
+    var slideContent = container.closest(".tv-slide-content");
     if (!events || typeof events !== "object") {
         if (container.dataset.renderSignature === "empty") return;
         container.dataset.renderSignature = "empty";
+        leaveEventFullscreenMode(container, slideContent);
         container.innerHTML = "<div class='tv-events-empty'>진행 중인 이벤트가 없습니다</div>";
         return;
     }
@@ -581,76 +618,66 @@ function renderEvents(events) {
         if (activeEvents.length === 0) {
             if (container.dataset.renderSignature === "empty") return;
             container.dataset.renderSignature = "empty";
+            leaveEventFullscreenMode(container, slideContent);
             container.innerHTML = "<div class='tv-events-empty'>진행 중인 이벤트가 없습니다</div>";
             return;
         }
 
         activeEvents.sort(function(a, b) { return (b.priority || 0) - (a.priority || 0); });
-        var eventRenderSignature = JSON.stringify(activeEvents.map(function(event) {
+        var fullscreenImages = [];
+        activeEvents.forEach(function(event) {
             var images = Array.isArray(event.images) ? event.images : (event.images && typeof event.images === "object" ? Object.values(event.images) : []);
             if (!images.length && event.image) images = [{ secure_url: event.image }];
-            return {
-                title: event.title || "",
-                description: event.description || "",
-                images: images.map(function(image) { return image && image.secure_url ? image.secure_url : ""; })
-            };
-        }));
-        if (container.dataset.renderSignature === eventRenderSignature) return;
-        var eventImageSignature = JSON.stringify(activeEvents.map(function(event) {
-            var images = Array.isArray(event.images) ? event.images : (event.images && typeof event.images === "object" ? Object.values(event.images) : []);
-            if (!images.length && event.image) images = [{ secure_url: event.image }];
-            return images.map(function(image) { return image && image.secure_url ? image.secure_url : ""; });
-        }));
-        if (container.dataset.imageSignature === eventImageSignature) {
-            var existingCards = container.querySelectorAll(".tv-event-card");
-            if (existingCards.length === activeEvents.length) {
-                activeEvents.forEach(function(event, index) {
-                    var card = existingCards[index];
-                    var title = card.querySelector(".tv-event-title");
-                    var description = card.querySelector(".tv-event-desc");
-                    if (title) title.textContent = event.title || "이벤트";
-                    if (event.description) {
-                        if (!description) {
-                            description = document.createElement("div");
-                            description.className = "tv-event-desc";
-                            card.appendChild(description);
-                        }
-                        description.textContent = event.description;
-                    } else if (description) {
-                        description.remove();
-                    }
-                });
-                container.dataset.renderSignature = eventRenderSignature;
-                return;
-            }
-        }
-        container.dataset.renderSignature = eventRenderSignature;
-        container.dataset.imageSignature = eventImageSignature;
+            images.forEach(function(image) {
+                var url = typeof image === "string" ? image : image && image.secure_url;
+                if (url) fullscreenImages.push({ url: url, title: event.title || "이벤트 이미지" });
+            });
+        });
 
+        if (fullscreenImages.length) {
+            var imageSignature = "images:" + JSON.stringify(fullscreenImages.map(function(image) { return image.url; }));
+            if (container.dataset.renderSignature === imageSignature) return;
+            container.dataset.renderSignature = imageSignature;
+            container.classList.add("tv-events-container--fullscreen");
+            if (slideContent) slideContent.classList.add("tv-slide-content--fullscreen-event");
+            container.innerHTML = '<div class="tv-event-fullscreen">' + fullscreenImages.map(function(image, index) {
+                return '<figure class="tv-event-fullscreen-frame' + (index === 0 ? " is-active" : "") + '">' +
+                    '<img src="' + escapeHtml(image.url) + '" alt="' + escapeHtml(image.title) + '"></figure>';
+            }).join("") + '</div>';
+            container.querySelectorAll(".tv-event-fullscreen-frame img").forEach(function(image) {
+                image.addEventListener("error", function() {
+                    var frame = image.closest(".tv-event-fullscreen-frame");
+                    if (frame) frame.remove();
+                    var remaining = container.querySelectorAll(".tv-event-fullscreen-frame");
+                    if (!remaining.length) {
+                        leaveEventFullscreenMode(container, slideContent);
+                        container.innerHTML = "<div class='tv-events-empty'>이벤트 이미지를 불러오지 못했습니다</div>";
+                        return;
+                    }
+                    startEventImageRotation(container);
+                }, { once: true });
+            });
+            startEventImageRotation(container);
+            return;
+        }
+
+        var textSignature = "text:" + JSON.stringify(activeEvents.map(function(event) {
+            return { title: event.title || "", description: event.description || "" };
+        }));
+        if (container.dataset.renderSignature === textSignature) return;
+        container.dataset.renderSignature = textSignature;
+        leaveEventFullscreenMode(container, slideContent);
         var html = "";
         for (var j = 0; j < activeEvents.length; j++) {
             var evt = activeEvents[j];
-            var eventImages = Array.isArray(evt.images) ? evt.images : (evt.images && typeof evt.images === "object" ? Object.values(evt.images) : []);
-            if (!eventImages.length && evt.image) eventImages = [{ secure_url: evt.image }];
             html += "<div class='tv-event-card'>";
-            if (eventImages.length) {
-                html += "<div class='tv-event-images'>";
-                eventImages.forEach(function(eventImage) {
-                    if (eventImage && eventImage.secure_url) html += "<img src='" + escapeHtml(eventImage.secure_url) + "' alt='' class='tv-event-image'>";
-                });
-                html += "</div>";
-            }
             html += "  <div class='tv-event-title'>" + escapeHtml(evt.title || "이벤트") + "</div>";
             if (evt.description) {
                 html += "  <div class='tv-event-desc'>" + escapeHtml(evt.description) + "</div>";
             }
             html += "</div>";
         }
-
         container.innerHTML = html;
-        container.querySelectorAll(".tv-event-image").forEach(function(image) {
-            image.addEventListener("error", function() { image.remove(); }, { once: true });
-        });
 }
 
 function subscribeEvents() {
@@ -886,6 +913,7 @@ window.addEventListener("pagehide", function() {
     window.clearTimeout(resumeTimer);
     window.clearTimeout(statusTimer);
     window.clearInterval(clockTimer);
+    stopEventImageRotation();
     if (tvAuthStateUnsubscribe) tvAuthStateUnsubscribe();
     if (tvSettingsListener) tvSettingsListener.off();
     if (visitorListener) visitorListener.off();

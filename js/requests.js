@@ -107,66 +107,31 @@ async function claimIdempotentRequest(request) {
     }
 
     const claimRef = db.ref(`requestClaims/${request.requestId}`);
-    let result;
-    try {
-        result = await claimRef.transaction((current) => {
-            if (current === null) {
-                return {
-                    ownerUid: user.uid,
-                    type: request.type,
-                    payloadHash: request.payloadHash,
-                    date: request.payload.date,
-                    status: "pending",
-                    createdAt: firebase.database.ServerValue.TIMESTAMP
-                };
-            }
-            if (current.ownerUid === user.uid
-                && current.type === request.type
-                && current.payloadHash === request.payloadHash) {
-                return current;
-            }
-            return;
-        }, undefined, false);
-    } catch (error) {
-        if (String(error?.code || error?.message || "").toLowerCase().includes("permission_denied")) {
-            const conflict = new Error("REQUEST_ID_CONFLICT");
-            conflict.code = "REQUEST_ID_CONFLICT";
-            conflict.cause = error;
-            throw conflict;
+    const result = await claimRef.transaction((current) => {
+        if (current === null) {
+            return {
+                ownerUid: user.uid,
+                type: request.type,
+                payloadHash: request.payloadHash,
+                date: request.payload.date,
+                status: "pending",
+                createdAt: firebase.database.ServerValue.TIMESTAMP
+            };
         }
-        throw error;
-    }
+        if (current.ownerUid === user.uid
+            && current.type === request.type
+            && current.payloadHash === request.payloadHash) {
+            return current;
+        }
+        return;
+    }, undefined, false);
 
     if (!result.committed) {
         const error = new Error("REQUEST_ID_CONFLICT");
         error.code = "REQUEST_ID_CONFLICT";
         throw error;
     }
-    // A transaction snapshot can contain the client's estimated resolution of
-    // ServerValue.TIMESTAMP. Read the committed claim once so later Rules can
-    // compare the log timestamp with the authoritative server value exactly.
-    const committedSnapshot = await claimRef.once("value");
-    const committedClaim = committedSnapshot.val();
-    if (!committedClaim
-        || committedClaim.ownerUid !== user.uid
-        || committedClaim.type !== request.type
-        || committedClaim.payloadHash !== request.payloadHash) {
-        const error = new Error("REQUEST_ID_CONFLICT");
-        error.code = "REQUEST_ID_CONFLICT";
-        throw error;
-    }
-    return committedClaim;
-}
-
-function requestSaveErrorMessage(error) {
-    const code = String(error?.code || error?.message || "").toLowerCase();
-    if (code.includes("request_id_conflict")) {
-        return "이미 처리된 요청입니다. 새로고침 후 다시 시도해 주세요.";
-    }
-    if (["network", "disconnected", "unavailable", "timeout"].some((value) => code.includes(value))) {
-        return "네트워크 연결이 불안정합니다. 연결을 확인한 후 다시 시도해 주세요.";
-    }
-    return "저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+    return result.snapshot.val();
 }
 
 async function isRequestComplete(request) {

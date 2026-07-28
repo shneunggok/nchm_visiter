@@ -612,7 +612,7 @@ function submitForm(type) {
             })
             .catch((err) => {
                 logError("submitForm-visit", err);
-                showMessage(requestSaveErrorMessage(err));
+                showMessage("저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
             })
             .finally(() => {
                 window.clearTimeout(visitSlowTimer);

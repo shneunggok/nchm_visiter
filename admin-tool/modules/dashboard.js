@@ -223,7 +223,7 @@ window.AT_Dashboard = {
             var tr = document.createElement("tr");
             tr.className = "at-log-row";
 
-            var purposesHtml = (log.purposes || []).map(function(p) {
+            var purposesHtml = visitUtils.toArray(log.purposes).map(function(p) {
                 return '<span class="at-purpose-badge">' + visitUtils.escapeHtml(p) + '</span>';
             }).join("");
 
@@ -253,7 +253,10 @@ window.AT_Dashboard = {
             var tr = document.createElement("tr");
             tr.className = "at-log-row at-ar-row";
 
-            var details = (log.users || []).map(function(user) {
+            var users = visitUtils.toArray(log.users);
+            var details = users.filter(function(user) {
+                return user && typeof user === "object";
+            }).map(function(user) {
                 return '<span class="at-user-chip">' +
                     visitUtils.escapeHtml(user.name) +
                     ' <span class="at-user-meta">(' + visitUtils.escapeHtml(user.gender) + ', ' +
@@ -263,8 +266,8 @@ window.AT_Dashboard = {
             var safeKey = visitUtils.escapeHtml(log._key || "");
             tr.innerHTML = '<td class="at-date-cell">' + visitUtils.escapeHtml(log.date) + '</td>' +
                 '<td class="at-time-cell at-indigo-text">' + visitUtils.escapeHtml(log.timeSlot) + '</td>' +
-                '<td class="at-name-cell">' + visitUtils.escapeHtml(log.users && log.users[0] ? log.users[0].name : "") + '</td>' +
-                '<td>' + (log.users ? log.users.length : 0) + '명</td>' +
+                '<td class="at-name-cell">' + visitUtils.escapeHtml(users[0] ? users[0].name : "") + '</td>' +
+                '<td>' + users.length + '명</td>' +
                 '<td class="at-detail-cell">' + details + '</td>' +
                 '<td><button class="at-delete-btn" data-at-ar-key="' + safeKey + '">삭제</button></td>';
 
@@ -302,7 +305,7 @@ window.AT_Dashboard = {
                     utils.sanitizeCsvField(log.name) + "," +
                     utils.sanitizeCsvField(log.gender) + "," +
                     utils.sanitizeCsvField((log.age || "").split("(")[0]) + ',"' +
-                    utils.sanitizeCsvField((log.purposes || []).join(", ")) + '"\n';
+                    utils.sanitizeCsvField(utils.toArray(log.purposes).join(", ")) + '"\n';
             });
             fileName = "\uBC29\uBB38\uB4F1\uB85D_" + utils.formatLocalDate(new Date()) + ".csv";
         } else {
@@ -315,13 +318,14 @@ window.AT_Dashboard = {
             }
             csvContent += "\uC608\uC57D\uB0A0\uC9DC,\uC608\uC57D\uC2DC\uAC04,\uB300\uD45C\uC790,\uCD1D\uC778\uC6D0,\uC774\uC6A9\uC790\uC0C1\uC138\n";
             ars.forEach(function(log) {
-                var details = (log.users || []).map(function(u) {
+                var users = utils.toArray(log.users);
+                var details = users.filter(Boolean).map(function(u) {
                     return u.name + "(" + u.gender + "/" + (u.age || "").split("(")[0] + ")";
                 }).join(" | ");
                 csvContent += utils.sanitizeCsvField(log.date) + "," +
                     utils.sanitizeCsvField(log.timeSlot) + "," +
-                    utils.sanitizeCsvField(log.users && log.users[0] ? log.users[0].name : "") + "," +
-                    (log.users ? log.users.length : 0) + ',"' +
+                    utils.sanitizeCsvField(users[0] ? users[0].name : "") + "," +
+                    users.length + ',"' +
                     utils.sanitizeCsvField(details) + '"\n';
             });
             fileName = "AR\uC608\uC57D_" + utils.formatLocalDate(new Date()) + ".csv";
@@ -333,5 +337,6 @@ window.AT_Dashboard = {
         link.setAttribute("href", url);
         link.setAttribute("download", fileName);
         link.click();
+        setTimeout(function() { URL.revokeObjectURL(url); }, 0);
     }
 };

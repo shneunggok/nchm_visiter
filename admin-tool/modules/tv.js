@@ -16,11 +16,15 @@
 
 window.AT_TV = {
 
+    _initialized: false,
+
     /**
      * Initialize TV management.
      * Called after the module loads.
      */
     init: function() {
+        if (this._initialized) return;
+        this._initialized = true;
         // Add TV management tab to sidebar
         this._addTVMenu();
 

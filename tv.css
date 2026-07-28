@@ -19,14 +19,25 @@ html, body {
     height: 100%;
     overflow: hidden;
     font-family: 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: var(--tv-background, #0f172a);
-    color: var(--tv-text-primary, #ffffff);
-    --tv-text-primary: #ffffff;
-    --tv-text-secondary: #e2e8f0;
-    --tv-text-muted: #cbd5e1;
-    --tv-card-background: rgba(15,23,42,.38);
-    --tv-card-border: rgba(255,255,255,.18);
-    --tv-accent: #93c5fd;
+    background: var(--tv-background, #0b1220);
+    color: var(--tv-text-primary, #f8fafc);
+    --tv-bg-primary: #0b1220;
+    --tv-bg-secondary: #111827;
+    --tv-surface: rgba(30, 41, 59, .82);
+    --tv-surface-strong: #1e293b;
+    --tv-text-primary: #f8fafc;
+    --tv-text-secondary: #cbd5e1;
+    --tv-text-muted: #94a3b8;
+    --tv-card-background: rgba(30, 41, 59, .76);
+    --tv-card-border: rgba(148, 163, 184, .22);
+    --tv-accent: #2dd4bf;
+    --tv-accent-secondary: #38bdf8;
+    --tv-success: #22c55e;
+    --tv-warning: #f59e0b;
+    --tv-danger: #ef4444;
+    --tv-rank-first: #facc15;
+    --tv-rank-second: #cbd5e1;
+    --tv-rank-third: #fb923c;
     --tv-logo-filter: brightness(0) invert(1);
 }
 
@@ -54,7 +65,12 @@ html, body {
     left: 0;
     width: 100%;
     height: 100%;
-    background: var(--tv-background, #0f172a);
+    background:
+        radial-gradient(circle at 18% 10%, rgba(45, 212, 191, .10), transparent 28%),
+        radial-gradient(circle at 84% 84%, rgba(56, 189, 248, .08), transparent 30%),
+        var(--tv-background, #0b1220);
+    background-position: center;
+    background-size: cover;
     z-index: 0;
 }
 
@@ -75,15 +91,15 @@ html, body {
     align-items: center;
     justify-content: center;
     opacity: 0;
-    transition: opacity 0.8s ease, transform 0.8s ease;
-    transform: scale(0.95);
+    transition: opacity .7s ease, transform .7s ease;
+    transform: translateY(14px);
     z-index: 1;
     pointer-events: none;
 }
 
 .tv-slide.active-slide {
     opacity: 1;
-    transform: scale(1);
+    transform: translateY(0);
     z-index: 2;
     pointer-events: auto;
 }
@@ -91,7 +107,7 @@ html, body {
 .tv-slide-content {
     text-align: center;
     padding: clamp(28px, 4vw, 72px);
-    width: min(1120px, 92vw);
+    width: min(1280px, 92vw);
     max-height: 88vh;
     z-index: 3;
     position: relative;
@@ -125,16 +141,16 @@ html, body {
 }
 
 .tv-title {
-    font-size: clamp(2.6rem, 4.4vw, 5.3rem);
+    font-size: clamp(3rem, 5vw, 6rem);
     font-weight: 900;
-    letter-spacing: -0.02em;
+    letter-spacing: -.045em;
     color: var(--tv-text-primary);
     margin-bottom: 16px;
     line-height: 1.2;
 }
 
 .tv-subtitle {
-    font-size: clamp(1.2rem, 1.8vw, 2rem);
+    font-size: clamp(1.35rem, 2vw, 2.25rem);
     color: var(--tv-text-secondary);
     font-weight: 500;
     margin-bottom: 48px;
@@ -145,14 +161,14 @@ html, body {
 }
 
 .tv-clock {
-    font-size: clamp(4.2rem, 9vw, 10rem);
+    font-size: clamp(4.8rem, 9.5vw, 10.5rem);
     font-weight: 900;
     letter-spacing: 0.05em;
     color: var(--tv-text-primary);
     font-variant-numeric: tabular-nums;
     line-height: 1;
     margin-bottom: 8px;
-    text-shadow: 0 0 40px rgba(96, 165, 250, 0.3);
+    text-shadow: 0 0 42px rgba(45, 212, 191, .17);
 }
 
 .tv-date {
@@ -212,7 +228,7 @@ html, body {
 
 /* ==================== Section Title ==================== */
 .tv-section-title {
-    font-size: clamp(2.4rem, 4vw, 4.5rem);
+    font-size: clamp(2.8rem, 4.5vw, 5.25rem);
     font-weight: 900;
     color: var(--tv-text-primary);
     margin-bottom: 32px;
@@ -221,7 +237,7 @@ html, body {
 
 /* ==================== Section Description ==================== */
 .tv-section-desc {
-    font-size: clamp(1.05rem, 1.5vw, 1.5rem);
+    font-size: clamp(1.2rem, 1.65vw, 1.75rem);
     color: var(--tv-text-secondary);
     margin-top: 24px;
     font-weight: 400;
@@ -237,7 +253,7 @@ html, body {
 }
 
 .tv-visitor-count {
-    font-size: clamp(7rem, 16vw, 15rem);
+    font-size: clamp(8rem, 18vw, 18rem);
     font-weight: 900;
     color: var(--tv-accent);
     line-height: 1;
@@ -300,9 +316,9 @@ html, body {
     text-align: center;
 }
 
-.tv-rank-1 { color: #fbbf24; text-shadow: 0 0 20px rgba(251, 191, 36, 0.4); }
+.tv-rank-1 { color: var(--tv-rank-first); text-shadow: 0 0 20px rgba(250, 204, 21, .22); }
 .tv-rank-2 { color: var(--tv-rank-secondary, #cbd5e1); }
-.tv-rank-3 { color: #d97706; }
+.tv-rank-3 { color: var(--tv-rank-third); }
 .tv-rank-other { color: var(--tv-rank-other, #94a3b8); }
 
 .tv-rank-name {
@@ -340,26 +356,27 @@ html, body {
     gap: 8px;
     background: var(--tv-card-background);
     border: 1px solid var(--tv-card-border);
-    border-radius: 24px;
-    padding: 32px 48px;
-    min-width: 250px;
+    border-radius: 30px;
+    padding: clamp(36px, 4vw, 64px) clamp(60px, 7vw, 110px);
+    min-width: min(520px, 82vw);
+    box-shadow: 0 24px 70px rgba(2, 6, 23, .24);
 }
 
 .tv-ar-label {
-    font-size: 1.2rem;
+    font-size: clamp(1.25rem, 1.7vw, 1.8rem);
     color: var(--tv-text-secondary);
     font-weight: 600;
 }
 
 .tv-ar-count {
-    font-size: 5rem;
+    font-size: clamp(6rem, 11vw, 11rem);
     font-weight: 900;
     color: var(--tv-accent);
     line-height: 1;
 }
 
 .tv-ar-unit {
-    font-size: 1.5rem;
+    font-size: clamp(1.5rem, 2vw, 2.2rem);
     color: var(--tv-text-secondary);
     font-weight: 700;
 }
@@ -370,7 +387,7 @@ html, body {
     flex-direction: column;
     align-items: center;
     gap: 20px;
-    max-width: 700px;
+    max-width: 980px;
     margin: 0 auto;
 }
 
@@ -393,7 +410,7 @@ html, body {
     height: 100%;
     margin: 0;
     overflow: hidden;
-    background: #020617;
+    background: var(--tv-bg-primary);
 }
 
 .tv-event-fullscreen-frame {
@@ -410,29 +427,32 @@ html, body {
     display: block;
     width: 100vw;
     height: 100vh;
-    object-fit: cover;
+    object-fit: contain;
 }
 
 body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-bg-overlay,
-body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-indicator,
-body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-preview-controls {
+body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-indicator {
     display: none;
 }
 
 .tv-events-empty {
-    font-size: 1.5rem;
-    color: var(--tv-text-muted);
-    padding: 40px;
+    width: min(760px, 90vw);
+    padding: 48px;
+    border: 1px solid var(--tv-card-border);
+    border-radius: 24px;
+    background: var(--tv-card-background);
+    color: var(--tv-text-secondary);
+    font-size: clamp(1.3rem, 1.8vw, 1.9rem);
 }
 
 .tv-event-card {
     background: var(--tv-card-background);
     border: 1px solid var(--tv-card-border);
     border-radius: 20px;
-    padding: 24px 32px;
+    padding: clamp(28px, 3vw, 46px);
     width: 100%;
     text-align: left;
-    animation: rankSlideIn 0.5s ease forwards;
+    animation: rankSlideIn .45s ease forwards;
     opacity: 0;
 }
 
@@ -452,16 +472,28 @@ body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-preview-controls {
 }
 
 .tv-event-title {
-    font-size: 1.8rem;
+    font-size: clamp(2rem, 3vw, 3.5rem);
     font-weight: 800;
     color: var(--tv-text-primary);
     margin-bottom: 8px;
 }
 
+.tv-event-period {
+    margin: 10px 0 14px;
+    color: var(--tv-accent);
+    font-size: clamp(1rem, 1.25vw, 1.35rem);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
 .tv-event-desc {
-    font-size: 1.2rem;
+    font-size: clamp(1.2rem, 1.7vw, 1.8rem);
     color: var(--tv-text-secondary);
     line-height: 1.5;
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 5;
 }
 
 .tv-content-error {
@@ -504,7 +536,7 @@ body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-preview-controls {
     flex-direction: column;
     align-items: center;
     gap: 16px;
-    max-width: 700px;
+    max-width: 980px;
     margin: 0 auto;
 }
 
@@ -524,7 +556,7 @@ body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-preview-controls {
     width: 100%;
     height: 100%;
     margin: 0;
-    background: #020617;
+    background: var(--tv-bg-primary);
     overflow: hidden;
 }
 
@@ -532,49 +564,67 @@ body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-preview-controls {
     width: 100vw;
     height: 100vh;
     display: block;
-    object-fit: cover;
+    object-fit: contain;
 }
 
 body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-bg-overlay,
-body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-indicator,
-body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls {
+body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-indicator {
     display: none;
 }
 
 .tv-notices-empty {
-    font-size: 1.5rem;
-    color: var(--tv-text-muted);
-    padding: 40px;
+    width: min(760px, 90vw);
+    padding: 48px;
+    border: 1px solid var(--tv-card-border);
+    border-radius: 24px;
+    background: var(--tv-card-background);
+    color: var(--tv-text-secondary);
+    font-size: clamp(1.3rem, 1.8vw, 1.9rem);
 }
 
 .tv-notice-item {
     background: var(--tv-card-background);
     border: 1px solid var(--tv-card-border);
-    border-radius: 16px;
-    padding: 20px 28px;
+    border-radius: 20px;
+    padding: clamp(22px, 2.2vw, 34px);
     width: 100%;
     text-align: left;
     animation: rankSlideIn 0.5s ease forwards;
     opacity: 0;
 }
 
+.tv-notice-item--emergency {
+    border-color: rgba(239, 68, 68, .58);
+    box-shadow: inset 5px 0 var(--tv-danger);
+}
+
+.tv-notice-item--emergency .tv-notice-title::before {
+    content: "긴급 · ";
+    color: #fca5a5;
+}
+
 .tv-notice-title {
-    font-size: 1.5rem;
+    font-size: clamp(1.65rem, 2.3vw, 2.6rem);
     font-weight: 700;
     color: var(--tv-text-primary);
     margin-bottom: 4px;
 }
 
 .tv-notice-date {
-    font-size: 0.9rem;
+    font-size: clamp(.95rem, 1.2vw, 1.25rem);
     color: var(--tv-text-secondary);
 }
 
 .tv-notice-description {
     margin-top: 8px;
-    font-size: 1.05rem;
+    max-width: 42em;
+    font-size: clamp(1.15rem, 1.5vw, 1.55rem);
     line-height: 1.6;
     color: var(--tv-text-secondary);
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 5;
 }
 
 /* ==================== Attendance Event Boards ==================== */
@@ -592,15 +642,15 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
     gap: clamp(18px, 2vh, 28px);
-    color: #172033;
+    color: var(--tv-text-primary);
     isolation: isolate;
 }
 
 .tv-attendance-board--visit {
     background:
-        radial-gradient(circle at 88% 8%, rgba(251, 191, 36, .25), transparent 25%),
-        radial-gradient(circle at 8% 94%, rgba(251, 146, 60, .18), transparent 29%),
-        linear-gradient(145deg, #fffaf0 0%, #fff7df 48%, #fef3c7 100%);
+        radial-gradient(circle at 88% 8%, rgba(45, 212, 191, .16), transparent 25%),
+        radial-gradient(circle at 8% 94%, rgba(56, 189, 248, .10), transparent 29%),
+        linear-gradient(145deg, #0b1220 0%, #111827 52%, #0f1b2d 100%);
 }
 
 .tv-attendance-board--visit::before {
@@ -608,7 +658,7 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     position: absolute;
     inset: 22px;
     z-index: -1;
-    border: 2px solid rgba(180, 83, 9, .15);
+    border: 1px solid rgba(45, 212, 191, .22);
     border-radius: 36px;
     pointer-events: none;
 }
@@ -619,7 +669,7 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     right: 7vw;
     bottom: 5vh;
     z-index: -1;
-    color: rgba(180, 83, 9, .07);
+    color: rgba(45, 212, 191, .045);
     font-size: 8vw;
     font-weight: 900;
     transform: rotate(-8deg);
@@ -656,7 +706,7 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     font-size: clamp(.72rem, .8vw, 1rem);
     font-weight: 900;
     letter-spacing: .24em;
-    color: #b45309;
+    color: var(--tv-accent);
 }
 
 .tv-attendance-board--ar .tv-attendance-kicker {
@@ -682,7 +732,7 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
 }
 
 .tv-attendance-board--visit .tv-attendance-heading-row h2 {
-    color: #7c2d12;
+    color: var(--tv-text-primary);
 }
 
 .tv-attendance-board--ar .tv-attendance-heading-row h2 {
@@ -696,7 +746,7 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     font-size: clamp(1rem, 1.35vw, 1.45rem);
     line-height: 1.45;
     font-weight: 650;
-    color: #6b4a2e;
+    color: var(--tv-text-secondary);
 }
 
 .tv-attendance-board--ar .tv-attendance-heading-row p {
@@ -781,10 +831,10 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     min-width: 0;
     min-height: clamp(118px, 15vh, 172px);
     padding: clamp(18px, 2vw, 30px);
-    border: 1px solid rgba(146, 64, 14, .18);
+    border: 1px solid var(--tv-card-border);
     border-radius: 26px;
-    background: rgba(255, 255, 255, .78);
-    box-shadow: 0 18px 44px rgba(146, 64, 14, .09);
+    background: var(--tv-card-background);
+    box-shadow: 0 18px 44px rgba(2, 6, 23, .22);
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
@@ -794,9 +844,9 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
 
 .tv-visit-podium-card.tv-rank-position-1 {
     min-height: clamp(142px, 18vh, 204px);
-    border-color: rgba(217, 119, 6, .35);
-    background: linear-gradient(145deg, rgba(255,255,255,.94), rgba(254, 243, 199, .96));
-    box-shadow: 0 22px 55px rgba(180, 83, 9, .17);
+    border-color: rgba(250, 204, 21, .42);
+    background: linear-gradient(145deg, rgba(30,41,59,.96), rgba(66, 58, 24, .72));
+    box-shadow: 0 22px 55px rgba(2, 6, 23, .3);
 }
 
 .tv-visit-medal {
@@ -806,18 +856,19 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     display: grid;
     place-items: center;
     color: #fff;
-    background: #ea580c;
+    background: #475569;
     font-size: clamp(1.25rem, 1.8vw, 2rem);
     font-weight: 950;
 }
 
 .tv-rank-position-1 .tv-visit-medal {
-    background: linear-gradient(145deg, #f59e0b, #d97706);
+    color: #422006;
+    background: linear-gradient(145deg, #fde047, #f59e0b);
 }
 
 .tv-visit-podium-card small {
     display: block;
-    color: #9a5b2e;
+    color: var(--tv-text-muted);
     font-size: clamp(.85rem, 1vw, 1.1rem);
     font-weight: 900;
 }
@@ -840,14 +891,14 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: #431407;
+    color: var(--tv-text-primary);
     font-size: clamp(1.45rem, 2vw, 2.4rem);
     font-weight: 950;
 }
 
 .tv-visit-podium-card b,
 .tv-visit-ranking-list b {
-    color: #c2410c;
+    color: var(--tv-accent);
     font-size: clamp(1.65rem, 2.3vw, 2.7rem);
     white-space: nowrap;
 }
@@ -882,14 +933,14 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     gap: 18px;
     padding: 11px 22px;
     border-radius: 18px;
-    border: 1px solid rgba(146, 64, 14, .14);
-    background: rgba(255, 255, 255, .7);
+    border: 1px solid var(--tv-card-border);
+    background: var(--tv-card-background);
     animation: attendanceEnter .45s both;
 }
 
 .tv-attendance-rank-number {
     min-width: 2.1em;
-    color: #9a3412;
+    color: var(--tv-accent-secondary);
     font-size: clamp(1.2rem, 1.5vw, 1.7rem);
     font-weight: 950;
 }
@@ -899,7 +950,7 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: #431407;
+    color: var(--tv-text-primary);
     font-size: clamp(1.2rem, 1.55vw, 1.8rem);
 }
 
@@ -1039,7 +1090,7 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
 }
 
 .tv-attendance-board--visit .tv-attendance-goal-badge {
-    color: #9a3412;
+    color: var(--tv-rank-first);
 }
 
 .tv-attendance-board--ar .tv-attendance-goal-badge {
@@ -1077,7 +1128,12 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
 }
 
 .tv-attendance-board--visit .tv-attendance-footer {
-    color: #7c4a28;
+    color: var(--tv-text-muted);
+}
+
+.tv-attendance-board--visit .tv-attendance-brand-logo {
+    filter: brightness(0) invert(1);
+    opacity: .9;
 }
 
 .tv-attendance-board--ar .tv-attendance-footer {
@@ -1232,6 +1288,10 @@ body:has(#slide-notices.active-slide .tv-notice-fullscreen) .tv-preview-controls
     display: flex;
     gap: 12px;
     z-index: 10;
+}
+
+body:has(.tv-attendance-slide.active-slide) .tv-indicator {
+    bottom: 72px;
 }
 
 .tv-dot {

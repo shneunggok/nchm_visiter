@@ -38,6 +38,7 @@ window.AT_Visit = {
             self.logs = [];
             snapshot.forEach(function(child) {
                 var val = child.val();
+                if (!val || typeof val !== "object") return;
                 val._key = child.key;
                 self.logs.push(val);
             });

@@ -70,11 +70,22 @@ function formatLocalDate(date = new Date()) {
     return `${year}-${month}-${day}`;
 }
 
+function toArray(value) {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") return Object.values(value);
+    return [];
+}
+
+function isValidDateKey(value) {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const [year, month, day] = value.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
 function showMessage(msg, type = "error") {
     const box = dom.customAlert;
-    if (!_toastTimer) {
-        _toastTimer = null;
-    }
+    if (!box) return;
 
     if (_toastTimer) {
         clearTimeout(_toastTimer);
@@ -101,11 +112,13 @@ function createSlotKey(dateStr, timeSlot) {
 
 function collectUsers(containerSelector) {
     return Array.from(document.querySelectorAll(`${containerSelector} .ar-user-card`)).map((card) => {
+        const input = card.querySelector("input");
+        const select = card.querySelector("select");
         const genderBtn = Array.from(card.querySelectorAll("button")).find((button) => button.classList.contains("bg-white"));
         return {
-            name: card.querySelector("input").value.trim(),
+            name: input ? input.value.trim() : "",
             gender: genderBtn ? genderBtn.innerText.trim() : "남",
-            age: card.querySelector("select").value
+            age: select ? select.value : ""
         };
     });
 }
@@ -131,7 +144,6 @@ function validateUsers(users) {
     if (invalidUser) {
         return "이름은 한글/영문/숫자 10자 이내로 입력해 주세요!";
     }
-
     return null;
 }
 

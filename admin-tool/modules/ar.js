@@ -66,6 +66,7 @@ window.AT_AR = {
             self.todayLogs = [];
             snapshot.forEach(function(child) {
                 var val = child.val();
+                if (!val || typeof val !== "object") return;
                 val._key = child.key;
                 self.todayLogs.push(val);
             });
@@ -89,6 +90,7 @@ window.AT_AR = {
             self.logs = [];
             snapshot.forEach(function(child) {
                 var val = child.val();
+                if (!val || typeof val !== "object") return;
                 val._key = child.key;
                 self.logs.push(val);
             });
@@ -117,12 +119,12 @@ window.AT_AR = {
                 break;
             }
         }
-        var slotKey = log ? window.AT_Utils.createSlotKey(log.date, log.timeSlot) : null;
+        var slotKey = log && (log.slotKey || (log.date && log.timeSlot ? window.AT_Utils.createSlotKey(log.date, log.timeSlot) : ""));
+        var updates = {};
+        updates[(window.ADMIN_TOOL.collections.arLogs || "arLogs") + "/" + key] = null;
+        if (slotKey) updates[(window.ADMIN_TOOL.collections.arSlotLocks || "arSlotLocks") + "/" + slotKey] = null;
 
-        var removeLog = window.AT_arLogsRef.child(key).remove();
-        var removeLock = slotKey ? window.AT_arSlotLocksRef.child(slotKey).remove() : Promise.resolve();
-
-        Promise.all([removeLog, removeLock])
+        window.AT_db.ref().update(updates)
             .then(function() {
                 window.AT_Utils.showMessage("삭제되었습니다.", "info");
             })

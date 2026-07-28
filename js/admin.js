@@ -3,6 +3,8 @@ let adminLoginFailCount = 0;
 let adminLoginLockedUntil = 0;
 let adminIdleTimer = null;
 let adminActivityWatchersInitialized = false;
+let adminLoginUnlockTimer = null;
+let isAdminLoginPending = false;
 
 const ADMIN_LOGIN_MAX_ATTEMPTS = 5;
 const ADMIN_LOGIN_LOCK_MS = 60 * 1000;
@@ -31,12 +33,17 @@ function updateAdminLoginButtonState() {
         btn.disabled = true;
         const remainingSec = Math.ceil(remainingMs / 1000);
         showMessage(`로그인 시도가 너무 많습니다. ${remainingSec}초 후 다시 시도해 주세요.`);
+        window.clearTimeout(adminLoginUnlockTimer);
+        adminLoginUnlockTimer = window.setTimeout(updateAdminLoginButtonState, remainingMs + 50);
     } else {
         btn.disabled = false;
+        window.clearTimeout(adminLoginUnlockTimer);
+        adminLoginUnlockTimer = null;
     }
 }
 
 async function verifyAdminPassword() {
+    if (isAdminLoginPending) return;
     if (Date.now() < adminLoginLockedUntil) {
         updateAdminLoginButtonState();
         return;
@@ -48,6 +55,8 @@ async function verifyAdminPassword() {
         return;
     }
 
+    isAdminLoginPending = true;
+    dom.adminVerifyBtn.disabled = true;
     try {
         const credential = await auth.signInWithEmailAndPassword(ADMIN_EMAIL, password);
         // Force the newly authenticated administrator token into the Firebase
@@ -68,16 +77,30 @@ async function verifyAdminPassword() {
         subscribeVisitLogs();
         subscribeArLogsAll();
         enterAdminMode();
+        initializeAdminActivityWatchers();
+        resetAdminIdleTimeout();
     } catch (e) {
         logError("verifyAdminPassword", e);
-        adminLoginFailCount += 1;
-        if (adminLoginFailCount >= ADMIN_LOGIN_MAX_ATTEMPTS) {
-            adminLoginLockedUntil = Date.now() + ADMIN_LOGIN_LOCK_MS;
-            adminLoginFailCount = 0;
+        const failedCredentialCodes = [
+            "auth/invalid-credential",
+            "auth/invalid-login-credentials",
+            "auth/wrong-password",
+            "auth/user-not-found"
+        ];
+        if (failedCredentialCodes.includes(e && e.code)) {
+            adminLoginFailCount += 1;
+            if (adminLoginFailCount >= ADMIN_LOGIN_MAX_ATTEMPTS) {
+                adminLoginLockedUntil = Date.now() + ADMIN_LOGIN_LOCK_MS;
+                adminLoginFailCount = 0;
+            }
+            showMessage("비밀번호가 틀렸습니다.");
+            dom.adminPasswordInput.value = "";
+            dom.adminPasswordInput.focus();
+        } else {
+            showMessage("로그인 요청을 처리하지 못했습니다. 네트워크 연결을 확인한 뒤 다시 시도해 주세요.");
         }
-        showMessage("비밀번호가 틀렸습니다.");
-        dom.adminPasswordInput.value = "";
-        dom.adminPasswordInput.focus();
+    } finally {
+        isAdminLoginPending = false;
         updateAdminLoginButtonState();
     }
 }
@@ -107,10 +130,16 @@ function exitAdmin() {
 
     unsubscribeVisitLogs();
     unsubscribeArLogsAll();
+    if (typeof cancelAdminStatisticsLoads === "function") {
+        cancelAdminStatisticsLoads();
+    }
     isAdminUser = false;
     if (adminIdleTimer) {
         clearTimeout(adminIdleTimer);
         adminIdleTimer = null;
+    }
+    if (typeof unloadTvManagement === "function") {
+        unloadTvManagement();
     }
 
     auth.signOut().catch((e) => logError("exitAdmin", e));
@@ -118,10 +147,23 @@ function exitAdmin() {
     switchTab("visit");
 }
 
-function resetAdminIdleTimeout() {}
+function resetAdminIdleTimeout() {
+    if (!isAdminUser) return;
+    window.clearTimeout(adminIdleTimer);
+    adminIdleTimer = window.setTimeout(() => {
+        if (!isAdminUser) return;
+        showMessage("관리자 세션이 자동으로 종료되었습니다.", "info");
+        exitAdmin();
+    }, ADMIN_IDLE_LOGOUT_MS);
+}
 
 function initializeAdminActivityWatchers() {
+    if (adminActivityWatchersInitialized) return;
     adminActivityWatchersInitialized = true;
+    const handler = () => resetAdminIdleTimeout();
+    ["pointerdown", "keydown"].forEach((eventName) => {
+        document.addEventListener(eventName, handler, { passive: true });
+    });
 }
 
 function restoreAdminSession(user) {
@@ -132,32 +174,7 @@ function restoreAdminSession(user) {
     subscribeVisitLogs();
     subscribeArLogsAll();
     enterAdminMode();
+    initializeAdminActivityWatchers();
+    resetAdminIdleTimeout();
     return true;
-}
-
-
-function loadTvSettings() {
-    db.ref("tvSettings").once("value").then((snapshot) => {
-        const settings = snapshot.val() || {};
-        const display = settings.display || {};
-        document.querySelectorAll("#tv-display-options [data-tv-key]").forEach((input) => {
-            input.checked = display[input.dataset.tvKey] !== false;
-        });
-        if (settings.slideInterval) document.getElementById("tv-slide-interval").value = String(settings.slideInterval);
-    }).catch((error) => logError("loadTvSettings", error));
-}
-
-function saveTvSettings() {
-    const display = {};
-    document.querySelectorAll("#tv-display-options [data-tv-key]").forEach((input) => {
-        display[input.dataset.tvKey] = input.checked;
-    });
-    const slideInterval = Number(document.getElementById("tv-slide-interval").value);
-    db.ref("tvSettings").set({ display, slideInterval })
-        .then(() => showMessage("TV 설정이 저장되었습니다.", "success"))
-        .catch((error) => { logError("saveTvSettings", error); showMessage("TV 설정 저장 중 오류가 발생했습니다."); });
-}
-
-function openTvPreview() {
-    window.open("./tv.html", "nchm-tv-preview", "noopener");
 }

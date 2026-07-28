@@ -126,8 +126,7 @@ window.AT_Auth = {
             }
         };
 
-        document.addEventListener("click", handler);
+        document.addEventListener("pointerdown", handler);
         document.addEventListener("keydown", handler);
-        document.addEventListener("mousemove", handler);
     }
 };

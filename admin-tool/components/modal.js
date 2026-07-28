@@ -10,6 +10,7 @@
 window.AT_Modal = {
 
     _dom: {},
+    _pending: false,
 
     render: function(container) {
         var html = '';
@@ -77,6 +78,7 @@ window.AT_Modal = {
     },
 
     _verify: function() {
+        if (this._pending) return;
         var password = this._dom.input ? this._dom.input.value : "";
         if (!password) {
             this._showMsg("비밀번호를 입력해 주세요.");
@@ -87,6 +89,8 @@ window.AT_Modal = {
         var auth = window.AT_auth;
 
         var self = this;
+        this._pending = true;
+        if (this._dom.confirmBtn) this._dom.confirmBtn.disabled = true;
 
         auth.signInWithEmailAndPassword(adminEmail, password)
             .then(function(credential) {
@@ -112,6 +116,10 @@ window.AT_Modal = {
                     self._dom.input.value = "";
                     self._dom.input.focus();
                 }
+            })
+            .finally(function() {
+                self._pending = false;
+                if (self._dom.confirmBtn) self._dom.confirmBtn.disabled = false;
             });
     },
 
@@ -121,5 +129,4 @@ window.AT_Modal = {
         }
     }
 };
-
 

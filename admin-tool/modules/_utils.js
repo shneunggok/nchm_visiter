@@ -39,6 +39,19 @@ window.AT_Utils = {
         return year + "-" + month + "-" + day;
     },
 
+    toArray: function(value) {
+        if (Array.isArray(value)) return value;
+        if (value && typeof value === "object") return Object.values(value);
+        return [];
+    },
+
+    isValidDateKey: function(value) {
+        if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+        var parts = value.split("-").map(Number);
+        var date = new Date(parts[0], parts[1] - 1, parts[2]);
+        return date.getFullYear() === parts[0] && date.getMonth() === parts[1] - 1 && date.getDate() === parts[2];
+    },
+
     createSlotKey: function(dateStr, timeSlot) {
         return (dateStr + "_" + timeSlot).replace(/[.#$\[\]\/]/g, "-");
     },

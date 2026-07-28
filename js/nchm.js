@@ -13,14 +13,20 @@ let attendanceEventsQuery = null;
 let attendanceEventsState = {};
 let attendanceTickerResizeTimer = null;
 let currentAttendanceBannerType = "visit";
+let arNoticeTimer = null;
+let dateRolloverTimer = null;
+let currentPageDate = "";
+let pageInitialized = false;
+const pendingDeleteKeys = new Set();
 
 function getActiveAttendanceEvents(events, type) {
     const today = formatLocalDate(new Date());
-    return Object.values(events || {}).filter((event) => event
+    return toArray(events).filter((event) => event
         && event.enabled !== false
         && event.type === type
+        && isValidDateKey(event.startDate)
         && event.startDate <= today
-        && (!event.endDate || event.endDate >= today));
+        && (!event.endDate || (isValidDateKey(event.endDate) && event.endDate >= today)));
 }
 
 function updateAttendanceTabEventBadges(events) {
@@ -97,33 +103,52 @@ function subscribeAttendanceEventBanner() {
 }
 
 function deleteVisitLog(key) {
-    visitLogsRef.child(key).remove()
+    const pendingKey = `visit:${key}`;
+    if (!key || pendingDeleteKeys.has(pendingKey)) return;
+    pendingDeleteKeys.add(pendingKey);
+    const log = visitLogs.find((item) => item._key === key);
+    const updates = { [`visitLogs/${key}`]: null };
+    if (log && log.requestId) updates[`requestClaims/${log.requestId}`] = null;
+    db.ref().update(updates)
         .then(() => {
+            invalidateAdminStatsCache("visit");
             showMessage("삭제되었습니다.", "info");
+            return Promise.all([
+                loadAdminLogPage("visit"),
+                reloadAdminStatistics({ forceTypes: ["visit"] })
+            ]);
         })
         .catch((err) => {
             logError("deleteVisitLog", err);
             showMessage("삭제 중 오류가 발생했습니다.");
-        });
+        })
+        .finally(() => pendingDeleteKeys.delete(pendingKey));
 }
 
 function deleteArLog(key) {
+    const pendingKey = `ar:${key}`;
+    if (!key || pendingDeleteKeys.has(pendingKey)) return;
+    pendingDeleteKeys.add(pendingKey);
     const log = arLogs.find((l) => l._key === key);
-    const slotKey = log ? createSlotKey(log.date, log.timeSlot) : null;
+    const slotKey = log && (log.slotKey || (log.date && log.timeSlot ? createSlotKey(log.date, log.timeSlot) : ""));
+    const updates = { [`arLogs/${key}`]: null };
+    if (slotKey) updates[`arSlotLocks/${slotKey}`] = null;
+    if (log && log.requestId) updates[`requestClaims/${log.requestId}`] = null;
 
-    const removeLog = arLogsRef.child(key).remove();
-    const removeLock = slotKey
-        ? arSlotLocksRef.child(slotKey).remove()
-        : Promise.resolve();
-
-    Promise.all([removeLog, removeLock])
+    db.ref().update(updates)
         .then(() => {
+            invalidateAdminStatsCache("ar");
             showMessage("삭제되었습니다.", "info");
+            return Promise.all([
+                loadAdminLogPage("ar"),
+                reloadAdminStatistics({ forceTypes: ["ar"] })
+            ]);
         })
         .catch((err) => {
             logError("deleteArLog", err);
             showMessage("삭제 중 오류가 발생했습니다.");
-        });
+        })
+        .finally(() => pendingDeleteKeys.delete(pendingKey));
 }
 
 function switchTab(type) {
@@ -200,12 +225,14 @@ function showArNotice() {
     let sec = 3;
     text.textContent = `확인했습니다 (${sec})`;
 
-    const timer = setInterval(() => {
+    window.clearInterval(arNoticeTimer);
+    arNoticeTimer = window.setInterval(() => {
         sec -= 1;
         if (sec > 0) {
             text.textContent = `확인했습니다 (${sec})`;
         } else {
-            clearInterval(timer);
+            window.clearInterval(arNoticeTimer);
+            arNoticeTimer = null;
             text.textContent = "확인했습니다 ✓";
             btn.disabled = false;
             btn.classList.remove("cursor-not-allowed");
@@ -214,6 +241,8 @@ function showArNotice() {
 }
 
 function closeArNotice() {
+    window.clearInterval(arNoticeTimer);
+    arNoticeTimer = null;
     dom.arNoticeModal.classList.add("hidden");
 }
 
@@ -327,6 +356,15 @@ function generateTimeSlots() {
 
 function setFilter(type) {
     currentFilter = type;
+    if (isAdminUser) {
+        if (typeof cancelAdminStatisticsLoads === "function") {
+            cancelAdminStatisticsLoads();
+        }
+        if (typeof cancelAdminLogLoads === "function") {
+            cancelAdminLogLoads();
+        }
+        updateAdminDashboard();
+    }
 
     document.querySelectorAll(".filter-chip").forEach((btn) => {
         btn.classList.remove("active");
@@ -344,13 +382,11 @@ function setFilter(type) {
         dom.customDateInputs.classList.add("hidden");
     }
 
-    if (type === "all") {
-        updateAdminDashboard();
-    }
 }
 
 function isDateInRange(dateStr) {
-    const targetDate = new Date(dateStr);
+    if (!isValidDateKey(dateStr)) return false;
+    const targetDate = new Date(`${dateStr}T00:00:00`);
     if (currentFilter === "all") return true;
 
     if (currentFilter === "month") {
@@ -363,8 +399,9 @@ function isDateInRange(dateStr) {
         const start = dom.startDate.value;
         const end = dom.endDate.value;
         if (!start || !end) return true;
-        const startDate = new Date(start);
-        const endDate = new Date(end);
+        if (!isValidDateKey(start) || !isValidDateKey(end) || start > end) return false;
+        const startDate = new Date(`${start}T00:00:00`);
+        const endDate = new Date(`${end}T00:00:00`);
         endDate.setHours(23, 59, 59);
         return targetDate >= startDate && targetDate <= endDate;
     }
@@ -437,58 +474,17 @@ function updateAdminDashboard() {
     const filteredVisitLogs = visitLogs.filter((log) => isDateInRange(log.date));
     const filteredArLogs = arLogs.filter((log) => isDateInRange(log.date));
     const mainCategories = [...PURPOSES];
-
-    const vStats = {};
-    mainCategories.forEach((category) => {
-        vStats[category] = {};
-        AGE_GROUPS.forEach((age) => {
-            vStats[category][age] = { 남: 0, 여: 0 };
-        });
-    });
-
-    filteredVisitLogs.forEach((log) => {
-        (log.purposes || []).forEach((purpose) => {
-            if (PURPOSES.includes(purpose) && vStats[purpose] && vStats[purpose][log.age]) {
-                vStats[purpose][log.age][log.gender] += 1;
-            }
-        });
-    });
-
-    //filteredArLogs.forEach((log) => {
-      //  (log.users || []).forEach((user) => {
-        //    if (vStats["AR실"][user.age]) {
-          //      vStats["AR실"][user.age][user.gender] += 1;
-            //}
-       // });
-    //});
+    const periodVisit = getAdminPeriodAggregate("visit");
+    const periodAr = getAdminPeriodAggregate("ar");
+    const vStats = periodVisit.purposeStats;
 
     renderStatsTable(vStats, mainCategories, "visit-stats-body", "visit-stats-footer", "sum-col");
 
-    const studyStats = { "스터디룸": {} };
-    AGE_GROUPS.forEach((age) => {
-        studyStats["스터디룸"][age] = { 남: 0, 여: 0 };
-    });
-
-    filteredVisitLogs.forEach((log) => {
-        if ((log.purposes || []).includes("스터디룸")) {
-            studyStats["스터디룸"][log.age][log.gender] += 1;
-        }
-    });
+    const studyStats = periodVisit.studyStats;
 
     renderStatsTable(studyStats, ["스터디룸"], "study-stats-body", "study-stats-footer", "sum-col");
 
-    const arStats = { "AR 이용": {} };
-    AGE_GROUPS.forEach((age) => {
-        arStats["AR 이용"][age] = { 남: 0, 여: 0 };
-    });
-
-    filteredArLogs.forEach((log) => {
-        (log.users || []).forEach((user) => {
-            if (arStats["AR 이용"][user.age]) {
-                arStats["AR 이용"][user.age][user.gender] += 1;
-            }
-        });
-    });
+    const arStats = periodAr.arStats;
 
     renderStatsTable(arStats, ["AR 이용"], "ar-stats-body", "ar-stats-footer", "ar-sum-col");
 
@@ -497,7 +493,7 @@ function updateAdminDashboard() {
         const tr = document.createElement("tr");
         tr.className = "border-b hover:bg-slate-50";
 
-        const purposesHtml = (log.purposes || []).map((purpose) =>
+        const purposesHtml = toArray(log.purposes).map((purpose) =>
             `<span class="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-[10px] font-bold">${escapeHtml(purpose)}</span>`
         ).join("");
 
@@ -523,14 +519,16 @@ function updateAdminDashboard() {
         dom.visitLogBody.appendChild(tr);
     });
 
-    dom.visitCountBadge.innerText = filteredVisitLogs.length + "건";
+    dom.visitCountBadge.innerText = `현재 페이지 ${filteredVisitLogs.length}건`;
 
     dom.arLogBody.innerHTML = "";
     filteredArLogs.slice().reverse().forEach((log) => {
         const tr = document.createElement("tr");
         tr.className = "border-b hover:bg-indigo-50/30";
 
-        const details = (log.users || [])
+        const users = toArray(log.users);
+        const details = users
+            .filter((user) => user && typeof user === "object")
             .map((user) =>
                 `<span class="inline-block bg-slate-100 rounded-lg px-2 py-1 mr-1 mb-1 text-slate-700 font-medium">
                     ${escapeHtml(user.name)}
@@ -544,8 +542,8 @@ function updateAdminDashboard() {
         tr.innerHTML = `
             <td class="py-3 text-slate-500 font-bold text-xs">${escapeHtml(log.date)}</td>
             <td class="py-3 text-indigo-600 font-bold">${escapeHtml(log.timeSlot)}</td>
-            <td class="font-bold">${escapeHtml(log.users?.[0]?.name || "")}</td>
-            <td>${log.users?.length || 0}명</td>
+            <td class="font-bold">${escapeHtml(users[0]?.name || "")}</td>
+            <td>${users.length}명</td>
             <td class="text-xs text-left px-4 py-2">${details}</td>
             <td>
                 <button onclick="deleteArLog('${escapeHtml(log._key)}')"
@@ -558,7 +556,8 @@ function updateAdminDashboard() {
         dom.arLogBody.appendChild(tr);
     });
 
-    dom.arCountBadge.innerText = filteredArLogs.length + "건";
+    dom.arCountBadge.innerText = `현재 페이지 ${filteredArLogs.length}건`;
+    updateAdminStatsProgressUi();
 }
 
 function submitForm(type) {
@@ -584,15 +583,27 @@ function submitForm(type) {
 
         isSubmittingVisit = true;
         const visitSubmitBtn = document.querySelector("#section-visit .submit-btn");
-        if (visitSubmitBtn) visitSubmitBtn.disabled = true;
+        const visitSubmitLabel = visitSubmitBtn ? visitSubmitBtn.textContent : "";
+        if (visitSubmitBtn) {
+            visitSubmitBtn.disabled = true;
+            visitSubmitBtn.textContent = "저장 중...";
+        }
+        const visitSlowTimer = window.setTimeout(() => {
+            showMessage("네트워크 응답이 지연되고 있습니다. 중복 등록을 막기 위해 완료될 때까지 기다려 주세요.", "info");
+        }, 8000);
 
-        const savePromises = users.map((user) => {
-            const logData = { date: dateStr, time: timeStr, name: user.name, gender: user.gender, age: user.age, purposes };
-            return saveVisitLog(logData);
-        });
+        const logDataList = users.map((user) => ({
+            date: dateStr,
+            time: timeStr,
+            name: user.name,
+            gender: user.gender,
+            age: user.age,
+            purposes
+        }));
 
-        Promise.all(savePromises)
-            .then(() => {
+        saveVisitLogs(logDataList)
+            .then((request) => {
+                completePersistentRequest(request.requestId);
                 showMessage(`${users.length}명 방문 등록이 완료되었습니다! ✓`, "success");
                 dom.visitUserContainer.innerHTML = "";
                 document.querySelectorAll(".v-purpose").forEach((button) => button.classList.remove("active"));
@@ -604,8 +615,12 @@ function submitForm(type) {
                 showMessage("저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
             })
             .finally(() => {
+                window.clearTimeout(visitSlowTimer);
                 isSubmittingVisit = false;
-                if (visitSubmitBtn) visitSubmitBtn.disabled = false;
+                if (visitSubmitBtn) {
+                    visitSubmitBtn.disabled = false;
+                    visitSubmitBtn.textContent = visitSubmitLabel;
+                }
             });
     } else {
         if (isSubmittingAr) return;
@@ -626,10 +641,18 @@ function submitForm(type) {
         const logData = { date: dateStr, timeSlot, users };
         isSubmittingAr = true;
         const arSubmitBtn = document.querySelector("#section-ar .submit-btn");
-        if (arSubmitBtn) arSubmitBtn.disabled = true;
+        const arSubmitLabel = arSubmitBtn ? arSubmitBtn.textContent : "";
+        if (arSubmitBtn) {
+            arSubmitBtn.disabled = true;
+            arSubmitBtn.textContent = "예약 저장 중...";
+        }
+        const arSlowTimer = window.setTimeout(() => {
+            showMessage("예약 확인이 지연되고 있습니다. 같은 요청을 다시 보내지 말고 잠시 기다려 주세요.", "info");
+        }, 8000);
 
         reserveSlotAndSaveArLog(dateStr, timeSlot, logData)
-            .then(() => {
+            .then((request) => {
+                completePersistentRequest(request.requestId);
                 showMessage("AR 예약이 완료되었습니다! ✓", "success");
                 dom.arUserContainer.innerHTML = "";
                 document.querySelectorAll(".time-slot-btn").forEach((button) => button.classList.remove("active"));
@@ -649,8 +672,12 @@ function submitForm(type) {
                 }
             })
             .finally(() => {
+                window.clearTimeout(arSlowTimer);
                 isSubmittingAr = false;
-                if (arSubmitBtn) arSubmitBtn.disabled = false;
+                if (arSubmitBtn) {
+                    arSubmitBtn.disabled = false;
+                    arSubmitBtn.textContent = arSubmitLabel;
+                }
             });
     }
 }
@@ -667,7 +694,7 @@ function exportToExcel(type) {
         }
         csvContent += "날짜,시간,이름,성별,나이,이용목적\n";
         filtered.forEach((log) => {
-            csvContent += `${sanitizeCsvField(log.date)},${sanitizeCsvField(log.time)},${sanitizeCsvField(log.name)},${sanitizeCsvField(log.gender)},${sanitizeCsvField((log.age || "").split("(")[0])},"${sanitizeCsvField((log.purposes || []).join(", "))}"\n`;
+            csvContent += `${sanitizeCsvField(log.date)},${sanitizeCsvField(log.time)},${sanitizeCsvField(log.name)},${sanitizeCsvField(log.gender)},${sanitizeCsvField((log.age || "").split("(")[0])},"${sanitizeCsvField(toArray(log.purposes).join(", "))}"\n`;
         });
         fileName = `방문등록_${formatLocalDate(new Date())}.csv`;
     } else {
@@ -678,8 +705,9 @@ function exportToExcel(type) {
         }
         csvContent += "예약날짜,예약시간,대표자,총인원,이용자상세\n";
         filtered.forEach((log) => {
-            const details = (log.users || []).map((user) => `${user.name}(${user.gender}/${(user.age || "").split("(")[0]})`).join(" | ");
-            csvContent += `${sanitizeCsvField(log.date)},${sanitizeCsvField(log.timeSlot)},${sanitizeCsvField(log.users?.[0]?.name || "")},${log.users?.length || 0},"${sanitizeCsvField(details)}"\n`;
+            const users = toArray(log.users);
+            const details = users.filter(Boolean).map((user) => `${user.name || ""}(${user.gender || ""}/${(user.age || "").split("(")[0]})`).join(" | ");
+            csvContent += `${sanitizeCsvField(log.date)},${sanitizeCsvField(log.timeSlot)},${sanitizeCsvField(users[0]?.name || "")},${users.length},"${sanitizeCsvField(details)}"\n`;
         });
         fileName = `AR예약_${formatLocalDate(new Date())}.csv`;
     }
@@ -690,6 +718,7 @@ function exportToExcel(type) {
     link.setAttribute("href", url);
     link.setAttribute("download", fileName);
     link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function initFilterOptions() {
@@ -753,12 +782,24 @@ function changeVisitCount(delta) {
 }
 
 function initializePage() {
+    if (pageInitialized) return;
+    pageInitialized = true;
     const now = new Date();
+    currentPageDate = formatLocalDate(now);
     dom.currentDate.innerText = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
     dom.startDate.value = formatLocalDate(now);
     dom.endDate.value = formatLocalDate(now);
 
     initFilterOptions();
+    [dom.filterYearSelect, dom.filterMonthSelect, dom.startDate, dom.endDate].forEach((input) => {
+        input?.addEventListener("change", () => {
+            if (isAdminUser && typeof cancelAdminStatisticsLoads === "function") {
+                cancelAdminStatisticsLoads();
+                cancelAdminLogLoads();
+                updateAdminDashboard();
+            }
+        });
+    });
     changeArCount(1);
     changeVisitCount(1);
     refreshIcons();
@@ -791,13 +832,44 @@ function initializePage() {
             authResolved = true;
             subscribeArLogsToday();
             subscribeAttendanceEventBanner();
+            resumePendingRequests();
         } catch (error) {
             logError("auth-restore", error);
             showMessage("로그인 상태를 확인하지 못했습니다. 새로고침 후 다시 시도해 주세요.");
         } finally {
-            if (authResolved && authLoading) authLoading.classList.add("hidden");
+            if (authLoading) authLoading.classList.add("hidden");
         }
     });
+
+    scheduleDateRollover();
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) refreshDateSensitiveState();
+    });
+}
+
+function refreshDateSensitiveState() {
+    const now = new Date();
+    const nextDate = formatLocalDate(now);
+    if (currentPageDate === nextDate) return;
+    currentPageDate = nextDate;
+    dom.currentDate.innerText = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
+    if (!isAdminUser) {
+        dom.startDate.value = nextDate;
+        dom.endDate.value = nextDate;
+        subscribeArLogsToday();
+    }
+    renderAttendanceEventBanner(attendanceEventsState);
+    generateTimeSlots();
+}
+
+function scheduleDateRollover() {
+    window.clearTimeout(dateRolloverTimer);
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    dateRolloverTimer = window.setTimeout(() => {
+        refreshDateSensitiveState();
+        scheduleDateRollover();
+    }, Math.max(1000, nextMidnight.getTime() - now.getTime() + 250));
 }
 
 document.addEventListener("DOMContentLoaded", initializePage);

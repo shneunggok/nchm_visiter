@@ -20,6 +20,7 @@ var tvAttendanceState = {
     arError: false,
     preferences: { attendanceVisit: true, attendanceAr: true },
     listeners: [],
+    querySignatures: {},
     statusDate: "",
     dateTimer: null,
     debugSignatures: {}
@@ -528,16 +529,13 @@ function refreshAttendanceDateState() {
     renderAttendanceBoard("visit");
     renderAttendanceBoard("ar");
     syncAttendanceSlideAvailability();
-}
-
-function startAttendanceDateTimer() {
-    if (tvAttendanceState.dateTimer) return;
-    tvAttendanceState.statusDate = formatLocalDate(new Date());
-    tvAttendanceState.dateTimer = window.setInterval(refreshAttendanceDateState, 60000);
+    refreshAttendanceLogSubscriptions();
 }
 
 function subscribeAttendanceBoards() {
-    startAttendanceDateTimer();
+    // tv.js owns the single clock/date timer and calls
+    // refreshAttendanceDateState at midnight and after visibility restoration.
+    tvAttendanceState.statusDate = formatLocalDate(new Date());
     if (tvAttendanceState.listeners.length) return;
     if (isAttendanceDemoMode()) {
         tvAttendanceState.events = {};
@@ -548,28 +546,73 @@ function subscribeAttendanceBoards() {
         syncAttendanceSlideAvailability();
         return;
     }
-    var sources = [
-        { ref: db.ref("tvContent/attendanceEvents"), state: "events", error: "eventError", label: "attendanceEvents" },
-        { ref: visitLogsRef, state: "visitLogs", error: "visitError", label: "visitLogs" },
-        { ref: arLogsRef, state: "arLogs", error: "arError", label: "arLogs" }
-    ];
-    sources.forEach(function(source) {
-        var success = function(snapshot) {
-            tvAttendanceState[source.state] = attendanceSnapshotValue(snapshot);
-            tvAttendanceState[source.error] = false;
-            renderAttendanceBoard("visit");
-            renderAttendanceBoard("ar");
-            syncAttendanceSlideAvailability();
-        };
-        var failure = function(error) {
-            console.error("[tv-attendance:" + source.label + "] Firebase subscription error:", error && (error.code || error.message));
-            tvAttendanceState[source.error] = true;
-            renderAttendanceBoard("visit");
-            renderAttendanceBoard("ar");
-        };
-        source.ref.on("value", success, failure);
-        tvAttendanceState.listeners.push({ ref: source.ref, success: success });
+    var eventsRef = db.ref("tvContent/attendanceEvents");
+    var success = function(snapshot) {
+        tvAttendanceState.events = attendanceSnapshotValue(snapshot);
+        tvAttendanceState.eventError = false;
+        refreshAttendanceLogSubscriptions();
+        renderAttendanceBoard("visit");
+        renderAttendanceBoard("ar");
+        syncAttendanceSlideAvailability();
+    };
+    var failure = function(error) {
+        console.error("[tv-attendance:attendanceEvents] Firebase subscription error:", error && (error.code || error.message));
+        tvAttendanceState.eventError = true;
+        renderAttendanceBoard("visit");
+        renderAttendanceBoard("ar");
+    };
+    eventsRef.on("value", success, failure);
+    tvAttendanceState.listeners.push({ kind: "events", ref: eventsRef, success: success });
+}
+
+function removeAttendanceListener(kind) {
+    tvAttendanceState.listeners = tvAttendanceState.listeners.filter(function(listener) {
+        if (listener.kind !== kind) return true;
+        listener.ref.off("value", listener.success);
+        return false;
     });
+}
+
+function subscribeAttendanceLogSource(type, baseRef) {
+    var stateKey = type === "ar" ? "arLogs" : "visitLogs";
+    var errorKey = type === "ar" ? "arError" : "visitError";
+    var event = selectAttendanceEvent(tvAttendanceState.events, type);
+    var startDate = event && isValidDateKey(event.startDate) ? event.startDate : "";
+    var endDate = event && isValidDateKey(event.endDate)
+        ? event.endDate
+        : (startDate ? formatLocalDate(new Date()) : "");
+    var signature = startDate + "|" + endDate;
+    if (tvAttendanceState.querySignatures[type] === signature) return;
+
+    tvAttendanceState.querySignatures[type] = signature;
+    removeAttendanceListener(type);
+    if (!startDate) {
+        tvAttendanceState[stateKey] = {};
+        tvAttendanceState[errorKey] = false;
+        return;
+    }
+
+    var query = baseRef.orderByChild("date").startAt(startDate);
+    if (endDate) query = query.endAt(endDate);
+    query = query.limitToLast(5000);
+    var success = function(snapshot) {
+        tvAttendanceState[stateKey] = attendanceSnapshotValue(snapshot);
+        tvAttendanceState[errorKey] = false;
+        renderAttendanceBoard(type);
+    };
+    var failure = function(error) {
+        console.error("[tv-attendance:" + stateKey + "] Firebase subscription error:", error && (error.code || error.message));
+        tvAttendanceState[errorKey] = true;
+        renderAttendanceBoard(type);
+    };
+    query.on("value", success, failure);
+    tvAttendanceState.listeners.push({ kind: type, ref: query, success: success });
+}
+
+function refreshAttendanceLogSubscriptions() {
+    if (isAttendanceDemoMode() || tvAttendanceState.events === null) return;
+    subscribeAttendanceLogSource("visit", visitLogsRef);
+    subscribeAttendanceLogSource("ar", arLogsRef);
 }
 
 function unsubscribeAttendanceBoards() {
@@ -583,4 +626,5 @@ function unsubscribeAttendanceBoards() {
     }
     tvAttendanceState.statusDate = "";
     tvAttendanceState.debugSignatures = {};
+    tvAttendanceState.querySignatures = {};
 }

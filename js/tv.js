@@ -53,10 +53,29 @@ let tvLastSettings = {};
 let clockTimer = null;
 let resumeTimer = null;
 let statusTimer = null;
+let lastStatusWriteAt = 0;
+let pendingStatusSlideId = "";
+const TV_STATUS_HEARTBEAT_MS = 5 * 60 * 1000;
+const TV_PREVIEW_MODE = new URLSearchParams(location.search).get("preview") === "1";
+const TV_PREVIEW_STORAGE_KEY = "nchm.tv.preview.v1";
 let navigationBound = false;
 let tvDestroyed = false;
 let tvRealtimeSubscribed = false;
 let tvAuthStateUnsubscribe = null;
+let tvSubscribedDate = "";
+let tvEventsCache = null;
+let tvNoticesCache = null;
+let tvPreviewDraft = null;
+let tvHadActiveEvents = false;
+let tvHadActiveNotices = false;
+
+if (TV_PREVIEW_MODE) {
+    try {
+        tvPreviewDraft = JSON.parse(sessionStorage.getItem(TV_PREVIEW_STORAGE_KEY) || "null");
+    } catch (error) {
+        console.warn("[tv] invalid preview draft ignored");
+    }
+}
 
 // ==================== Firebase Refs ====================
 const tvSettingsRef = db.ref("tvSettings");
@@ -104,6 +123,16 @@ function updateClock() {
     const dayNames = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
     const dayName = dayNames[now.getDay()];
     TV_DOM.dateDisplay.textContent = year + "년 " + month + "월 " + day + "일 " + dayName;
+
+    const today = formatLocalDate(now);
+    if (tvRealtimeSubscribed && tvSubscribedDate !== today) {
+        tvSubscribedDate = today;
+        subscribeTodayVisitors();
+        subscribeARStatus();
+        if (typeof refreshAttendanceDateState === "function") refreshAttendanceDateState();
+        renderEvents(tvEventsCache);
+        renderNotices(tvNoticesCache);
+    }
 }
 
 // ==================== Connection Status ====================
@@ -233,23 +262,22 @@ function restartSlideshowAfterManualNavigation() {
 }
 
 function updateTVStatus(slideId) {
+    if (!TVCommon.shouldWriteStatus(TV_PREVIEW_MODE)) return;
+    pendingStatusSlideId = slideId;
     window.clearTimeout(statusTimer);
+    var remaining = Math.max(0, TV_STATUS_HEARTBEAT_MS - (Date.now() - lastStatusWriteAt));
     statusTimer = window.setTimeout(function() {
-        db.ref("tvStatus").set({ online: true, lastSync: firebase.database.ServerValue.TIMESTAMP, currentSlide: slideId }).catch(function(error) {
+        lastStatusWriteAt = Date.now();
+        db.ref("tvStatus").set({ online: true, lastSync: firebase.database.ServerValue.TIMESTAMP, currentSlide: pendingStatusSlideId }).catch(function(error) {
             console.warn("[tv] status update skipped:", error.code || error.message);
         });
-    }, 100);
+    }, remaining);
 }
 
 // ==================== Slide Content Refresh ====================
 
 function refreshSlideContent(slideId) {
     switch (slideId) {
-        case "visitors":
-            break;
-        case "ar":
-            loadARStatus();
-            break;
         default:
             break;
     }
@@ -266,7 +294,9 @@ function subscribeTVSettings() {
     if (tvSettingsListener) tvSettingsListener.off();
     tvSettingsListener = tvSettingsRef;
     tvSettingsListener.on("value", function(snapshot) {
-        var settings = snapshot.val();
+        var settings = TV_PREVIEW_MODE && tvPreviewDraft && tvPreviewDraft.settings
+            ? tvPreviewDraft.settings
+            : snapshot.val();
         if (!settings) {
             setConnectionStatus("connected", "Firebase 연결됨 (기본 설정)");
             return;
@@ -275,15 +305,11 @@ function subscribeTVSettings() {
         tvLastSettings = settings;
         // Update enabled slides and playlist from settings
         if (Array.isArray(settings.slides) && settings.slides.length) {
-            var validSlides = settings.slides.filter(function(slide) {
-                return slide && typeof slide.id === "string" && TV_DOM.slideMap[slide.id.split("-")[0]];
-            });
-            ["attendanceVisit", "attendanceAr"].forEach(function(id) {
-                if (!validSlides.some(function(slide) { return slide.id.split("-")[0] === id; })) {
-                    validSlides.push({ id: id, enabled: true, duration: 15 });
-                }
+            var validSlides = TVCommon.normalizeFixedSlides(settings.slides).filter(function(slide) {
+                return TV_DOM.slideMap[slide.id];
             });
             if (validSlides.length) {
+                tvLastSettings = Object.assign({}, settings, { slides: validSlides });
                 TV_CONFIG.slideOrder = validSlides.map(function(slide) { return slide.id; });
                 TV_CONFIG.enabledSlides = {};
                 validSlides.forEach(function(slide) { TV_CONFIG.enabledSlides[slide.id] = slide.enabled !== false; });
@@ -342,31 +368,37 @@ function getContrastTextColor(backgroundColor) {
 
 function applyTVAppearance(settings) {
     var root = document.documentElement;
-    var theme = settings.theme || "dark";
-    document.body.dataset.tvTheme = theme;
     var bg = settings.background || {};
-    var fallbackColor = theme === "light" ? "#f8fafc" : (theme === "blue" ? "#082f6b" : "#0f172a");
+    var backgroundPreset = TVCommon.backgroundPreset(bg.preset);
+    var theme = backgroundPreset ? backgroundPreset.theme : settings.theme || "dark";
+    var preset = backgroundPreset || TVCommon.themePreset(theme);
+    document.body.dataset.tvTheme = theme;
+    var fallbackColor = preset.background;
     // 이전 데이터에는 테마가 light여도 기본 다크 색상(#0f172a)이 함께
     // 저장되어 있을 수 있다. 이 경우 기존 라이트 테마의 의도를 보존한다.
     var savedColor = String(bg.color || "").toLowerCase();
-    var backgroundColor = (!savedColor || (theme !== "dark" && savedColor === "#0f172a")) ? fallbackColor : bg.color;
+    var backgroundColor = (!savedColor || savedColor === "#0f172a") ? fallbackColor : bg.color;
     var hasImageBackground = Boolean(bg.image);
     var textColor = hasImageBackground ? "#ffffff" : getContrastTextColor(backgroundColor);
     var isLightBackground = textColor === "#111111";
     root.style.setProperty("--tv-background", backgroundColor);
+    var accent = preset.accent;
     root.style.setProperty("--tv-text-primary", textColor);
-    root.style.setProperty("--tv-text-secondary", isLightBackground ? "#334155" : "#e2e8f0");
-    root.style.setProperty("--tv-text-muted", isLightBackground ? "#475569" : "#cbd5e1");
-    root.style.setProperty("--tv-card-background", isLightBackground ? "rgba(255,255,255,.82)" : "rgba(15,23,42,.38)");
-    root.style.setProperty("--tv-card-border", isLightBackground ? "rgba(15,23,42,.16)" : "rgba(255,255,255,.18)");
-    root.style.setProperty("--tv-accent", isLightBackground ? "#1d4ed8" : "#93c5fd");
+    root.style.setProperty("--tv-text-secondary", isLightBackground ? "#334155" : "#cbd5e1");
+    root.style.setProperty("--tv-text-muted", isLightBackground ? "#64748b" : "#94a3b8");
+    root.style.setProperty("--tv-card-background", isLightBackground ? "rgba(255,255,255,.84)" : "rgba(30,41,59,.76)");
+    root.style.setProperty("--tv-card-border", isLightBackground ? "rgba(15,23,42,.15)" : "rgba(148,163,184,.22)");
+    root.style.setProperty("--tv-accent", accent);
+    root.style.setProperty("--tv-accent-secondary", preset.secondary);
     root.style.setProperty("--tv-rank-secondary", isLightBackground ? "#334155" : "#cbd5e1");
     root.style.setProperty("--tv-rank-other", isLightBackground ? "#475569" : "#94a3b8");
     root.style.setProperty("--tv-logo-filter", isLightBackground ? "none" : "brightness(0) invert(1)");
     document.body.dataset.tvImageBackground = hasImageBackground ? "true" : "false";
     var overlay = document.querySelector(".tv-bg-overlay");
     if (overlay) {
-        var nextBackgroundImage = bg.image ? "linear-gradient(rgba(2,6,23,.64),rgba(2,6,23,.64)),url('" + String(bg.image).replace(/'/g, "%27") + "')" : "";
+        var nextBackgroundImage = bg.image
+            ? "linear-gradient(rgba(2,6,23,.64),rgba(2,6,23,.64)),url('" + String(bg.image).replace(/'/g, "%27") + "')"
+            : backgroundPreset ? backgroundPreset.preview : "";
         if (overlay.style.backgroundImage !== nextBackgroundImage) overlay.style.backgroundImage = nextBackgroundImage;
     }
     var welcome = settings.welcome || {};
@@ -381,7 +413,8 @@ function applyTVAppearance(settings) {
 // ==================== Firebase: Today's Visitors ====================
 function subscribeTodayVisitors() {
     var todayStr = formatLocalDate(new Date());
-    var query = visitLogsRef.orderByChild("date").equalTo(todayStr);
+    tvSubscribedDate = todayStr;
+    var query = visitLogsRef.orderByChild("date").equalTo(todayStr).limitToLast(5000);
 
     if (visitorListener) visitorListener.off();
     visitorListener = query;
@@ -390,155 +423,23 @@ function subscribeTodayVisitors() {
         if (TV_DOM.todayCount) {
             TV_DOM.todayCount.textContent = count;
         }
+        var message = document.getElementById("tv-visitor-message");
+        if (message) message.textContent = count ? "오늘 문화의집을 함께한 방문자입니다" : "오늘 첫 방문을 기다리고 있습니다";
     }, function(error) {
         console.error("[tv] subscribeTodayVisitors error:", error);
         setConnectionStatus("error", "방문자 연결 오류");
     });
 }
 
-// ==================== Firebase: Attendance Ranking ====================
-
-/**
- * Load attendance ranking for the current month.
- * 
- * Strategy (optimized):
- *   1. First, try to read from the pre-computed attendanceCount path.
- *      This path is updated at write-time (when a visitor registers),
- *      so it avoids scanning all visitLogs on every TV display.
- *   2. If attendanceCount is empty (first run / migration), fall back
- *      to computing from visitLogs (the original full-scan method).
- * 
- * Firebase structure:
- *   attendanceCount/{year-month}/{sanitized-name}/
- *     { displayName: "김철수", count: 12 }
- */
-function loadAttendanceRanking() {
-    var now = new Date();
-    var monthKey = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
-
-    // Try optimized path first: read from pre-computed attendanceCount
-    var countRef = db.ref("attendanceCount/" + monthKey);
-    countRef.once("value").then(function(snapshot) {
-        var data = snapshot.val();
-        if (!data) {
-            // No pre-computed data yet — fall back to full scan
-            computeRankingFromLogs(monthKey);
-            return;
-        }
-
-        // Convert object to sorted array
-        var entries = [];
-        var keys = Object.keys(data);
-        for (var i = 0; i < keys.length; i++) {
-            var entry = data[keys[i]];
-            if (entry && entry.displayName && entry.count > 0) {
-                entries.push({ name: entry.displayName, count: entry.count });
-            }
-        }
-
-        // Sort by count descending
-        entries.sort(function(a, b) { return b.count - a.count; });
-
-        var top5 = entries.slice(0, 5);
-        renderRanking(top5);
-    }).catch(function(error) {
-        console.error("[tv] loadAttendanceRanking error:", error);
-        // Fall back to full scan on error
-        computeRankingFromLogs(monthKey);
-    });
-}
-
-/**
- * Fallback: Compute ranking by scanning all visitLogs for the month.
- * This is the original method, kept for backward compatibility
- * during migration to the optimized attendanceCount path.
- */
-function computeRankingFromLogs(monthKey) {
-    var parts = monthKey.split("-");
-    var year = parseInt(parts[0], 10);
-    var month = parseInt(parts[1], 10);
-    var startDate = year + "-" + String(month).padStart(2, "0") + "-01";
-    
-    // Calculate end date
-    var endDateObj = new Date(year, month, 0); // Last day of the month
-    var endDate = formatLocalDate(endDateObj);
-
-    var query = visitLogsRef.orderByChild("date").startAt(startDate).endAt(endDate);
-
-    query.once("value").then(function(snapshot) {
-        var nameCount = {};
-        snapshot.forEach(function(child) {
-            var log = child.val();
-            // Check if log has individual user data
-            if (log.name) {
-                var name = log.name.trim();
-                if (name) {
-                    nameCount[name] = (nameCount[name] || 0) + 1;
-                }
-            }
-        });
-
-        // Sort by count descending
-        var sorted = Object.keys(nameCount).map(function(name) {
-            return { name: name, count: nameCount[name] };
-        });
-        sorted.sort(function(a, b) { return b.count - a.count; });
-
-        var top5 = sorted.slice(0, 5);
-        renderRanking(top5);
-    }).catch(function(error) {
-        console.error("[tv] computeRankingFromLogs error:", error);
-        TV_DOM.rankingList.innerHTML = "<div class='tv-ranking-empty'>순위 정보를 불러올 수 없습니다</div>";
-    });
-}
-
-function renderRanking(ranking) {
-    var list = TV_DOM.rankingList;
-    if (!list) return;
-    if (!ranking || ranking.length === 0) {
-        list.innerHTML = "<div class='tv-ranking-empty'>출석 정보가 없습니다</div>";
-        return;
-    }
-
-    var html = "";
-    var rankEmojis = ["🥇", "🥈", "🥉"];
-    var rankClasses = ["tv-rank-1", "tv-rank-2", "tv-rank-3"];
-
-    for (var i = 0; i < ranking.length; i++) {
-        var item = ranking[i];
-        var rank = i + 1;
-        var rankNumClass = rank <= 3 ? rankClasses[i] : "tv-rank-other";
-        var rankDisplay = rank <= 3 ? rankEmojis[i] : rank;
-
-        html += "<div class='tv-ranking-item'>";
-        html += "  <div class='tv-rank-num " + rankNumClass + "'>" + rankDisplay + "</div>";
-        html += "  <div class='tv-rank-name'>" + escapeHtml(item.name) + "</div>";
-        html += "  <div class='tv-rank-count'>" + escapeHtml(String(item.count)) + "</div>";
-        html += "  <div class='tv-rank-label'>회</div>";
-        html += "</div>";
-    }
-
-    list.innerHTML = html;
-}
-
 // ==================== Firebase: AR Status ====================
-
-function loadARStatus() {
-    var todayStr = formatLocalDate(new Date());
-    var query = arLogsRef.orderByChild("date").equalTo(todayStr);
-
-    query.once("value").then(function(snapshot) {
-        var count = snapshot.numChildren();
-        if (TV_DOM.arCount) TV_DOM.arCount.textContent = count;
-
-    }).catch(function(error) {
-        console.error("[tv] loadARStatus error:", error);
-    });
-}
 
 function subscribeARStatus() {
     var todayStr = formatLocalDate(new Date());
-    var query = arLogsRef.orderByChild("date").equalTo(todayStr);
+    tvSubscribedDate = todayStr;
+    var query = arSlotLocksRef.orderByKey()
+        .startAt(todayStr + "_")
+        .endAt(todayStr + "_\uf8ff")
+        .limitToLast(50);
 
     if (arListener) arListener.off();
     arListener = query;
@@ -547,6 +448,8 @@ function subscribeARStatus() {
         if (TV_DOM.arCount) {
             TV_DOM.arCount.textContent = count;
         }
+        var message = document.getElementById("tv-ar-message");
+        if (message) message.textContent = count ? "현재 예약된 AR 체험 팀입니다" : "현재 예약된 AR 체험 팀이 없습니다";
     }, function(error) {
         console.error("[tv] subscribeARStatus error:", error);
         setConnectionStatus("error", "AR 예약 연결 오류");
@@ -597,19 +500,18 @@ function renderEvents(events) {
         container.dataset.renderSignature = "empty";
         leaveEventFullscreenMode(container, slideContent);
         container.innerHTML = "<div class='tv-events-empty'>진행 중인 이벤트가 없습니다</div>";
+        if (tvHadActiveEvents && TV_CONFIG.slideOrder[currentSlideIndex] === "events") advanceSlide();
+        tvHadActiveEvents = false;
         return;
     }
-        var now = new Date().getTime();
         var activeEvents = [];
         var keys = Object.keys(events);
+        var today = tvSubscribedDate || formatLocalDate(new Date());
 
         for (var i = 0; i < keys.length; i++) {
             var event = events[keys[i]];
             if (event && event.enabled !== false) {
-                var startTime = event.startDate ? new Date(event.startDate + "T00:00:00").getTime() : 0;
-                var endTime = event.endDate ? new Date(event.endDate + "T23:59:59").getTime() : Infinity;
-
-                if (startTime <= now && endTime >= now) {
+                if (TVCommon.isActive(event, today)) {
                     activeEvents.push(event);
                 }
             }
@@ -620,10 +522,15 @@ function renderEvents(events) {
             container.dataset.renderSignature = "empty";
             leaveEventFullscreenMode(container, slideContent);
             container.innerHTML = "<div class='tv-events-empty'>진행 중인 이벤트가 없습니다</div>";
+            if (tvHadActiveEvents && TV_CONFIG.slideOrder[currentSlideIndex] === "events") advanceSlide();
+            tvHadActiveEvents = false;
             return;
         }
+        tvHadActiveEvents = true;
 
-        activeEvents.sort(function(a, b) { return (b.priority || 0) - (a.priority || 0); });
+        activeEvents = TVCommon.sortEvents(activeEvents.map(function(event, index) {
+            return [String(index), event];
+        })).map(function(entry) { return entry[1]; });
         var fullscreenImages = [];
         activeEvents.forEach(function(event) {
             var images = Array.isArray(event.images) ? event.images : (event.images && typeof event.images === "object" ? Object.values(event.images) : []);
@@ -662,7 +569,7 @@ function renderEvents(events) {
         }
 
         var textSignature = "text:" + JSON.stringify(activeEvents.map(function(event) {
-            return { title: event.title || "", description: event.description || "" };
+            return { title: event.title || "", description: event.description || "", startDate: event.startDate || "", endDate: event.endDate || "" };
         }));
         if (container.dataset.renderSignature === textSignature) return;
         container.dataset.renderSignature = textSignature;
@@ -672,6 +579,9 @@ function renderEvents(events) {
             var evt = activeEvents[j];
             html += "<div class='tv-event-card'>";
             html += "  <div class='tv-event-title'>" + escapeHtml(evt.title || "이벤트") + "</div>";
+            if (evt.startDate || evt.endDate) {
+                html += "  <div class='tv-event-period'>" + escapeHtml(evt.startDate || "") + (evt.endDate ? " — " + escapeHtml(evt.endDate) : "부터") + "</div>";
+            }
             if (evt.description) {
                 html += "  <div class='tv-event-desc'>" + escapeHtml(evt.description) + "</div>";
             }
@@ -685,7 +595,8 @@ function subscribeEvents() {
     if (eventsListener) eventsListener.off();
     eventsListener = eventsRef;
     eventsRef.on("value", function(snapshot) {
-        renderEvents(snapshot.val());
+        tvEventsCache = snapshot.val();
+        renderEvents(tvEventsCache);
     }, function(error) {
         console.error("[tv] subscribeEvents error:", error);
         renderContentError(TV_DOM.eventsContainer, "이벤트 연결 오류");
@@ -704,17 +615,17 @@ function renderNotices(notices) {
             container.classList.remove("tv-notices-container--fullscreen");
             if (slideContent) slideContent.classList.remove("tv-slide-content--fullscreen-notice");
             container.innerHTML = "<div class='tv-notices-empty'>공지사항이 없습니다</div>";
+            if (tvHadActiveNotices && TV_CONFIG.slideOrder[currentSlideIndex] === "notices") advanceSlide();
+            tvHadActiveNotices = false;
             return;
         }
         var noticeList = [];
         var keys = Object.keys(notices);
-        var now = Date.now();
+        var today = tvSubscribedDate || formatLocalDate(new Date());
         for (var i = 0; i < keys.length; i++) {
             var notice = notices[keys[i]];
-            var start = notice && notice.startDate ? new Date(notice.startDate + "T00:00:00").getTime() : 0;
-            var end = notice && notice.endDate ? new Date(notice.endDate + "T23:59:59").getTime() : Infinity;
-            if (notice && notice.enabled !== false && (notice.title || notice.secure_url || notice.image || notice.imageUrl || notice.url) && start <= now && end >= now) {
-                noticeList.push(notice);
+            if (notice && notice.enabled !== false && (notice.title || notice.secure_url || notice.image || notice.imageUrl || notice.url) && TVCommon.isActive(notice, today)) {
+                noticeList.push([keys[i], notice]);
             }
         }
 
@@ -724,13 +635,14 @@ function renderNotices(notices) {
             container.classList.remove("tv-notices-container--fullscreen");
             if (slideContent) slideContent.classList.remove("tv-slide-content--fullscreen-notice");
             container.innerHTML = "<div class='tv-notices-empty'>공지사항이 없습니다</div>";
+            if (tvHadActiveNotices && TV_CONFIG.slideOrder[currentSlideIndex] === "notices") advanceSlide();
+            tvHadActiveNotices = false;
             return;
         }
+        tvHadActiveNotices = true;
 
         // Sort by creation date (newest first)
-        noticeList.sort(function(a, b) {
-            return Number(b.emergency) - Number(a.emergency) || (b.priority || 0) - (a.priority || 0) || (b.createdAt || 0) - (a.createdAt || 0);
-        });
+        noticeList = TVCommon.sortNotices(noticeList).map(function(entry) { return entry[1]; });
 
         var imageNotice = noticeList.find(function(notice) {
             return notice && (notice.type === "image" || notice.secure_url || notice.image || notice.imageUrl || notice.url);
@@ -765,13 +677,15 @@ function renderNotices(notices) {
         var maxNotices = Math.min(noticeList.length, 5); // Show max 5 notices
         for (var j = 0; j < maxNotices; j++) {
             var notice = noticeList[j];
-            html += "<div class='tv-notice-item'>";
+            html += "<div class='tv-notice-item" + (notice.emergency ? " tv-notice-item--emergency" : "") + "'>";
             html += "  <div class='tv-notice-title'>" + escapeHtml(notice.title) + "</div>";
             if (notice.description) {
                 html += "  <div class='tv-notice-description'>" + escapeHtml(notice.description) + "</div>";
             }
             if (notice.date) {
                 html += "  <div class='tv-notice-date'>" + escapeHtml(notice.date) + "</div>";
+            } else if (notice.startDate || notice.endDate) {
+                html += "  <div class='tv-notice-date'>" + escapeHtml(notice.startDate || "") + (notice.endDate ? " — " + escapeHtml(notice.endDate) : "부터") + "</div>";
             }
             html += "</div>";
         }
@@ -784,7 +698,11 @@ function subscribeNotices() {
     if (noticesListener) noticesListener.off();
     noticesListener = noticesRef;
     noticesRef.on("value", function(snapshot) {
-        renderNotices(snapshot.val());
+        tvNoticesCache = snapshot.val();
+        if (TV_PREVIEW_MODE && tvPreviewDraft && tvPreviewDraft.notice) {
+            tvNoticesCache = Object.assign({}, tvNoticesCache || {}, { __previewDraft: tvPreviewDraft.notice });
+        }
+        renderNotices(tvNoticesCache);
     }, function(error) {
         console.error("[tv] subscribeNotices error:", error);
         renderContentError(TV_DOM.noticesContainer, "공지사항 연결 오류");
@@ -842,6 +760,7 @@ function setupKeyboardShortcuts() {
 function subscribeTvRealtimeData() {
     if (tvRealtimeSubscribed || tvDestroyed) return;
     tvRealtimeSubscribed = true;
+    tvSubscribedDate = formatLocalDate(new Date());
     subscribeTVSettings();
     subscribeTodayVisitors();
     subscribeARStatus();
@@ -891,7 +810,7 @@ function initializeTV() {
 }
 
 function setupPreviewControls() {
-    if (!new URLSearchParams(location.search).has("preview")) return;
+    if (!TV_PREVIEW_MODE) return;
     var controls = document.getElementById("tv-preview-controls");
     if (!controls || controls.dataset.bound) return;
     controls.classList.remove("hidden");
@@ -921,7 +840,17 @@ window.addEventListener("pagehide", function() {
     if (typeof unsubscribeAttendanceBoards === "function") unsubscribeAttendanceBoards();
     if (eventsListener) eventsListener.off();
     if (noticesListener) noticesListener.off();
-    db.ref("tvStatus").set({ online: false, lastSync: firebase.database.ServerValue.TIMESTAMP }).catch(function() {});
+    if (TVCommon.shouldWriteStatus(TV_PREVIEW_MODE)) {
+        db.ref("tvStatus").set({ online: false, lastSync: firebase.database.ServerValue.TIMESTAMP }).catch(function() {});
+    }
+});
+
+document.addEventListener("visibilitychange", function() {
+    if (document.visibilityState !== "visible" || tvDestroyed) return;
+    updateClock();
+    if (typeof refreshAttendanceDateState === "function") refreshAttendanceDateState();
+    renderEvents(tvEventsCache);
+    renderNotices(tvNoticesCache);
 });
 
 // ==================== Bootstrap ====================

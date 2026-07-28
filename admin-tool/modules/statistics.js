@@ -43,7 +43,8 @@ window.AT_Stats = {
     },
 
     isDateInRange: function(dateStr) {
-        var targetDate = new Date(dateStr);
+        if (!window.AT_Utils.isValidDateKey(dateStr)) return false;
+        var targetDate = new Date(dateStr + "T00:00:00");
         if (this.currentFilter === "all") return true;
 
         if (this.currentFilter === "month") {
@@ -61,9 +62,9 @@ window.AT_Stats = {
             if (!startEl || !endEl) return true;
             var start = startEl.value;
             var end = endEl.value;
-            if (!start || !end) return true;
-            var startDate = new Date(start);
-            var endDate = new Date(end);
+            if (!window.AT_Utils.isValidDateKey(start) || !window.AT_Utils.isValidDateKey(end) || start > end) return false;
+            var startDate = new Date(start + "T00:00:00");
+            var endDate = new Date(end + "T00:00:00");
             endDate.setHours(23, 59, 59);
             return targetDate >= startDate && targetDate <= endDate;
         }
@@ -105,10 +106,12 @@ window.AT_Stats = {
         });
 
         filteredLogs.forEach(function(log) {
-            (log.purposes || []).forEach(function(purpose) {
+            window.AT_Utils.toArray(log.purposes).forEach(function(purpose) {
                 var purposes = window.ADMIN_TOOL.visitPurposes || [];
                 if (purposes.indexOf(purpose) >= 0 && stats[purpose] && stats[purpose][log.age]) {
-                    stats[purpose][log.age][log.gender] += 1;
+                    if (Object.prototype.hasOwnProperty.call(stats[purpose][log.age], log.gender)) {
+                        stats[purpose][log.age][log.gender] += 1;
+                    }
                 }
             });
         });
@@ -124,7 +127,9 @@ window.AT_Stats = {
         });
 
         filteredLogs.forEach(function(log) {
-            if ((log.purposes || []).indexOf("\uC2A4\uD130\uB514\uB8F8") >= 0) {
+            if (window.AT_Utils.toArray(log.purposes).indexOf("\uC2A4\uD130\uB514\uB8F8") >= 0 &&
+                stats["\uC2A4\uD130\uB514\uB8F8"][log.age] &&
+                Object.prototype.hasOwnProperty.call(stats["\uC2A4\uD130\uB514\uB8F8"][log.age], log.gender)) {
                 stats["\uC2A4\uD130\uB514\uB8F8"][log.age][log.gender] += 1;
             }
         });
@@ -140,8 +145,9 @@ window.AT_Stats = {
         });
 
         filteredLogs.forEach(function(log) {
-            (log.users || []).forEach(function(user) {
-                if (stats["AR \uC774\uC6A9"][user.age]) {
+            window.AT_Utils.toArray(log.users).forEach(function(user) {
+                if (user && stats["AR \uC774\uC6A9"][user.age] &&
+                    Object.prototype.hasOwnProperty.call(stats["AR \uC774\uC6A9"][user.age], user.gender)) {
                     stats["AR \uC774\uC6A9"][user.age][user.gender] += 1;
                 }
             });

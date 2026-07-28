@@ -1,61 +1,86 @@
 let arLogs = [];
 let arLogsToday = [];
 let arLogsTodayQuery = null;
-let arLogsAllQuery = null;
 
-function saveArLog(logData) {
-    return arLogsRef.push({
-        ...logData,
-        createdAt: firebase.database.ServerValue.TIMESTAMP
-    });
-}
-
-function reserveSlotAndSaveArLog(dateStr, timeSlot, logData) {
+async function reserveSlotAndSaveArLog(dateStr, timeSlot, logData, preparedRequest) {
+    const payload = { date: dateStr, timeSlot, logData };
+    const request = preparedRequest || await preparePersistentRequest("ar", payload);
+    const claim = await claimIdempotentRequest(request);
+    if (claim.status === "complete") return request;
+    const ownerUid = auth.currentUser.uid;
+    const createdAt = Number(claim.createdAt) || request.createdAt;
     const slotKey = createSlotKey(dateStr, timeSlot);
     const lockRef = arSlotLocksRef.child(slotKey);
-    const logRef = arLogsRef.push();
     const fullLogData = {
         ...logData,
         slotKey,
-        createdAt: firebase.database.ServerValue.TIMESTAMP
+        requestId: request.requestId,
+        payloadHash: request.payloadHash,
+        ownerUid,
+        createdAt
     };
 
-    return lockRef.transaction((current) => {
+    const lockResult = await lockRef.transaction((current) => {
         if (current === null) {
-            return true;
+            return request.requestId;
         }
+        if (current === request.requestId) return current;
         return;
-    }).then((result) => {
-        if (!result.committed) {
-            const err = new Error("SLOT_TAKEN");
-            err.code = "SLOT_TAKEN";
-            throw err;
+    }, undefined, false);
+
+    if (!lockResult.committed) {
+        const error = new Error("SLOT_TAKEN");
+        error.code = "SLOT_TAKEN";
+        throw error;
+    }
+
+    const updates = {
+        [`arLogs/${request.requestId}`]: fullLogData,
+        [`arSlotLocks/${slotKey}`]: request.requestId,
+        [`requestClaims/${request.requestId}/status`]: "complete",
+        [`requestClaims/${request.requestId}/completedAt`]: createdAt
+    };
+
+    try {
+        await db.ref().update(updates);
+    } catch (error) {
+        if (await isRequestComplete(request)) return request;
+        try {
+            await lockRef.transaction((current) => current === request.requestId ? null : current);
+        } catch (cleanupError) {
+            logError("reserveSlotAndSaveArLog-cleanup", cleanupError);
         }
-        return logRef.set(fullLogData).catch((err) => {
-            lockRef.remove().catch((cleanupError) => {
-                logError("reserveSlotAndSaveArLog-cleanup", cleanupError);
-            });
-            throw err;
-        });
-    });
+        throw error;
+    }
+    if (typeof invalidateAdminStatsCache === "function") {
+        invalidateAdminStatsCache("ar");
+    }
+    return request;
 }
 
 function subscribeArLogsToday() {
     if (arLogsTodayQuery) arLogsTodayQuery.off();
 
     const todayStr = formatLocalDate(new Date());
-    arLogsTodayQuery = arLogsRef.orderByChild("date").equalTo(todayStr);
+    arLogsTodayQuery = arSlotLocksRef.orderByKey()
+        .startAt(`${todayStr}_`)
+        .endAt(`${todayStr}_\uf8ff`)
+        .limitToLast(50);
 
     arLogsTodayQuery.on("value", (snapshot) => {
         arLogsToday = [];
         snapshot.forEach((child) => {
-            arLogsToday.push({ _key: child.key, ...child.val() });
+            const timeSlot = String(child.key || "").slice(todayStr.length + 1);
+            if (/^([01][0-9]|2[0-3]):(00|30)$/.test(timeSlot)) {
+                arLogsToday.push({ _key: child.key, date: todayStr, timeSlot });
+            }
         });
         if (!dom.sectionAr.classList.contains("hidden")) {
             generateTimeSlots();
         }
     }, (error) => {
         logError("arLogsTodayQuery.on", error);
+        showMessage("예약 현황을 불러오지 못했습니다. 네트워크 연결 후 다시 시도해 주세요.");
     });
 }
 
@@ -64,27 +89,10 @@ function subscribeArLogsAll() {
         arLogsTodayQuery.off();
         arLogsTodayQuery = null;
     }
-    if (arLogsAllQuery) {
-        arLogsAllQuery.off();
-    }
-
-    arLogsAllQuery = arLogsRef.orderByChild("date");
-    arLogsAllQuery.on("value", (snapshot) => {
-        arLogs = [];
-        snapshot.forEach((child) => {
-            arLogs.push({ _key: child.key, ...child.val() });
-        });
-        updateAdminDashboard();
-    }, (error) => {
-        logError("arLogsAllQuery.on", error);
-    });
+    return loadAdminLogPage("ar", { reset: true });
 }
 
 function unsubscribeArLogsAll() {
-    if (arLogsAllQuery) {
-        arLogsAllQuery.off();
-        arLogsAllQuery = null;
-    }
-    arLogs = [];
+    cancelAdminLogLoads("ar");
     subscribeArLogsToday();
 }

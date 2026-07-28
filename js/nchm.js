@@ -112,6 +112,7 @@ function deleteVisitLog(key) {
     db.ref().update(updates)
         .then(() => {
             invalidateAdminStatsCache("visit");
+            invalidateAdminLegacyVisitCache();
             showMessage("삭제되었습니다.", "info");
             return Promise.all([
                 loadAdminLogPage("visit"),
@@ -489,7 +490,7 @@ function updateAdminDashboard() {
     renderStatsTable(arStats, ["AR 이용"], "ar-stats-body", "ar-stats-footer", "ar-sum-col");
 
     dom.visitLogBody.innerHTML = "";
-    filteredVisitLogs.slice().reverse().forEach((log) => {
+    filteredVisitLogs.forEach((log) => {
         const tr = document.createElement("tr");
         tr.className = "border-b hover:bg-slate-50";
 

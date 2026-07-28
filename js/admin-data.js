@@ -1,4 +1,5 @@
 const ADMIN_LOG_PAGE_SIZE = 100;
+const ADMIN_LOG_QUERY_OVERFETCH = 2;
 const ADMIN_STATS_PAGE_SIZE = 400;
 const ADMIN_STATS_CACHE_VERSION = 1;
 const ADMIN_STATS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -29,6 +30,8 @@ const adminLogPagers = {
 
 let adminStatsRequestVersion = 0;
 let adminStatsActiveSignature = "";
+let adminLegacyVisitRecords = null;
+let adminLegacyVisitLoadPromise = null;
 const adminStatsMemoryCache = new Map();
 const adminPeriodStats = {
     visit: null,
@@ -127,6 +130,121 @@ function getAdminDateRange() {
         return { start, end, filter: "custom" };
     }
     return { start: "", end: "", filter: "all" };
+}
+
+function parseAdminLocalDateTimestamp(dateKey, endOfDay = false) {
+    if (!isValidDateKey(dateKey)) return null;
+    const [year, month, day] = dateKey.split("-").map(Number);
+    const timestamp = endOfDay
+        ? new Date(year, month - 1, day, 23, 59, 59, 999).getTime()
+        : new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
+    return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function getAdminTimestampRange(range) {
+    const start = range.start ? parseAdminLocalDateTimestamp(range.start) : 0;
+    const end = range.end
+        ? parseAdminLocalDateTimestamp(range.end, true)
+        : Number.MAX_SAFE_INTEGER;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
+        const error = new Error("INVALID_DATE_RANGE");
+        error.code = "INVALID_DATE_RANGE";
+        throw error;
+    }
+    return { start, end };
+}
+
+function getLegacyVisitTimestamp(record) {
+    const dateStart = parseAdminLocalDateTimestamp(record?.date);
+    if (!Number.isFinite(dateStart)) return 0;
+    const match = typeof record.time === "string"
+        ? record.time.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/)
+        : null;
+    if (!match) return dateStart;
+    return dateStart + (Number(match[1]) * 60 + Number(match[2])) * 60 * 1000;
+}
+
+function getFirebaseIntegerKey(key) {
+    const value = String(key);
+    if (!/^-?(0*)\d{1,10}$/.test(value)) return null;
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed >= -2147483648 && parsed <= 2147483647
+        ? parsed
+        : null;
+}
+
+function compareAdminFirebaseKeys(firstKeyValue, secondKeyValue) {
+    const firstKey = String(firstKeyValue);
+    const secondKey = String(secondKeyValue);
+    if (firstKey === secondKey) return 0;
+    const firstInteger = getFirebaseIntegerKey(firstKey);
+    const secondInteger = getFirebaseIntegerKey(secondKey);
+    if (firstInteger !== null) {
+        if (secondInteger !== null) {
+            return firstInteger === secondInteger
+                ? firstKey.length - secondKey.length
+                : firstInteger - secondInteger;
+        }
+        return -1;
+    }
+    if (secondInteger !== null) return 1;
+    return firstKey < secondKey ? -1 : 1;
+}
+
+function compareVisitRecordsNewest(first, second) {
+    const timestampDifference = second._sortCreatedAt - first._sortCreatedAt;
+    if (timestampDifference) return timestampDifference;
+    return -compareAdminFirebaseKeys(first._key, second._key);
+}
+
+function isVisitRecordOlderThanCursor(record, cursor) {
+    if (!cursor) return true;
+    if (record._sortCreatedAt !== cursor.createdAt) {
+        return record._sortCreatedAt < cursor.createdAt;
+    }
+    return compareAdminFirebaseKeys(record._key, cursor.key) < 0;
+}
+
+function isLegacyVisitInRange(record, range) {
+    if (!isValidDateKey(record?.date)) return range.filter === "all";
+    if (range.start && record.date < range.start) return false;
+    if (range.end && record.date > range.end) return false;
+    return true;
+}
+
+function invalidateAdminLegacyVisitCache() {
+    adminLegacyVisitRecords = null;
+    adminLegacyVisitLoadPromise = null;
+}
+
+function loadAdminLegacyVisitRecords() {
+    if (adminLegacyVisitRecords) return Promise.resolve(adminLegacyVisitRecords);
+    if (adminLegacyVisitLoadPromise) return adminLegacyVisitLoadPromise;
+
+    adminLegacyVisitLoadPromise = visitLogsRef
+        .orderByChild("createdAt")
+        .equalTo(null)
+        .once("value")
+        .then((snapshot) => {
+            const records = [];
+            snapshot.forEach((child) => {
+                const value = child.val();
+                if (!value || typeof value !== "object" || Number.isFinite(value.createdAt)) return;
+                records.push({
+                    _key: child.key,
+                    ...value,
+                    _sortCreatedAt: getLegacyVisitTimestamp(value),
+                    _legacyCreatedAt: true
+                });
+            });
+            records.sort(compareVisitRecordsNewest);
+            adminLegacyVisitRecords = records;
+            return records;
+        })
+        .finally(() => {
+            adminLegacyVisitLoadPromise = null;
+        });
+    return adminLegacyVisitLoadPromise;
 }
 
 function setAdminPagerLoading(type, loading) {
@@ -466,35 +584,81 @@ async function loadAdminLogPage(type, options = {}) {
         return;
     }
 
-    const anchor = pager.anchors[pager.pageIndex] || null;
-    let query = pager.ref.orderByChild("date");
-    if (range.start) query = query.startAt(range.start);
-    if (anchor) {
-        query = query.endAt(anchor.date, anchor.key).limitToLast(ADMIN_LOG_PAGE_SIZE + 2);
-    } else {
-        if (range.end) query = query.endAt(range.end);
-        query = query.limitToLast(ADMIN_LOG_PAGE_SIZE + 1);
-    }
-
     try {
-        const snapshot = await query.once("value");
-        if (requestVersion !== pager.requestVersion || !isAdminUser) return;
+        const anchor = pager.anchors[pager.pageIndex] || null;
+        let records;
 
-        let records = [];
-        snapshot.forEach((child) => {
-            const value = child.val();
-            if (value && typeof value === "object") {
-                records.push({ _key: child.key, ...value });
+        if (type === "visit") {
+            const timestampRange = getAdminTimestampRange(range);
+            let query = pager.ref
+                .orderByChild("createdAt")
+                .startAt(timestampRange.start);
+            query = anchor
+                ? query.endAt(anchor.createdAt, anchor.key)
+                : query.endAt(timestampRange.end);
+            query = query.limitToLast(ADMIN_LOG_PAGE_SIZE + ADMIN_LOG_QUERY_OVERFETCH);
+
+            const [snapshot, legacyRecords] = await Promise.all([
+                query.once("value"),
+                loadAdminLegacyVisitRecords()
+            ]);
+            if (requestVersion !== pager.requestVersion || !isAdminUser) return;
+
+            const candidates = [];
+            snapshot.forEach((child) => {
+                const value = child.val();
+                if (!value || typeof value !== "object" || !Number.isFinite(value.createdAt)) return;
+                const record = {
+                    _key: child.key,
+                    ...value,
+                    _sortCreatedAt: value.createdAt,
+                    _legacyCreatedAt: false
+                };
+                if (isVisitRecordOlderThanCursor(record, anchor)) candidates.push(record);
+            });
+            let legacyCandidateCount = 0;
+            for (const record of legacyRecords) {
+                if (isLegacyVisitInRange(record, range) &&
+                    isVisitRecordOlderThanCursor(record, anchor)) {
+                    candidates.push(record);
+                    legacyCandidateCount += 1;
+                    if (legacyCandidateCount >=
+                        ADMIN_LOG_PAGE_SIZE + ADMIN_LOG_QUERY_OVERFETCH) break;
+                }
             }
-        });
-        if (anchor) {
-            records = records.filter((record) =>
-                !(record._key === anchor.key && (record.date ?? null) === anchor.date)
-            );
-        }
-        pager.hasNext = records.length > ADMIN_LOG_PAGE_SIZE;
-        if (pager.hasNext) {
-            records = records.slice(records.length - ADMIN_LOG_PAGE_SIZE);
+            candidates.sort(compareVisitRecordsNewest);
+            pager.hasNext = candidates.length > ADMIN_LOG_PAGE_SIZE;
+            records = candidates.slice(0, ADMIN_LOG_PAGE_SIZE);
+        } else {
+            let query = pager.ref.orderByChild("date");
+            if (range.start) query = query.startAt(range.start);
+            if (anchor) {
+                query = query.endAt(anchor.date, anchor.key)
+                    .limitToLast(ADMIN_LOG_PAGE_SIZE + ADMIN_LOG_QUERY_OVERFETCH);
+            } else {
+                if (range.end) query = query.endAt(range.end);
+                query = query.limitToLast(ADMIN_LOG_PAGE_SIZE + 1);
+            }
+
+            const snapshot = await query.once("value");
+            if (requestVersion !== pager.requestVersion || !isAdminUser) return;
+
+            records = [];
+            snapshot.forEach((child) => {
+                const value = child.val();
+                if (value && typeof value === "object") {
+                    records.push({ _key: child.key, ...value });
+                }
+            });
+            if (anchor) {
+                records = records.filter((record) =>
+                    !(record._key === anchor.key && (record.date ?? null) === anchor.date)
+                );
+            }
+            pager.hasNext = records.length > ADMIN_LOG_PAGE_SIZE;
+            if (pager.hasNext) {
+                records = records.slice(records.length - ADMIN_LOG_PAGE_SIZE);
+            }
         }
         pager.assign(records);
         updateAdminDashboard();
@@ -515,9 +679,13 @@ function moveAdminLogPage(type, direction) {
     if (!pager || pager.loading) return;
     if (direction === "next") {
         if (!pager.hasNext || !pager.records().length) return;
-        const oldest = pager.records()[0];
+        const oldest = type === "visit"
+            ? pager.records()[pager.records().length - 1]
+            : pager.records()[0];
         pager.anchors = pager.anchors.slice(0, pager.pageIndex + 1);
-        pager.anchors.push({ date: oldest.date ?? null, key: oldest._key });
+        pager.anchors.push(type === "visit"
+            ? { createdAt: oldest._sortCreatedAt, key: oldest._key }
+            : { date: oldest.date ?? null, key: oldest._key });
         pager.pageIndex += 1;
     } else if (direction === "prev") {
         if (pager.pageIndex === 0) return;

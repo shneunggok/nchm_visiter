@@ -21,7 +21,7 @@
     },
 
     "visitLogs": {
-      ".indexOn": ["date", "requestId"],
+      ".indexOn": ["date", "requestId", "createdAt"],
       ".read": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || (query.orderByChild === 'date' && query.limitToLast != null && query.limitToLast <= 5000 && (query.equalTo != null || (query.startAt != null && query.endAt != null))))",
       "$logId": {
         ".write": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || ((!data.exists() && newData.child('ownerUid').val() === auth.uid && root.child('requestClaims').child(newData.child('requestId').val()).child('ownerUid').val() === auth.uid && root.child('requestClaims').child(newData.child('requestId').val()).child('type').val() === 'visit' && root.child('requestClaims').child(newData.child('requestId').val()).child('payloadHash').val() === newData.child('payloadHash').val()) || (data.exists() && newData.val() === data.val())))",

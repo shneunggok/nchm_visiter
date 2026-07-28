@@ -73,6 +73,7 @@
     "arSlotLocks": {
       ".read": "auth != null && query.orderByKey && query.startAt != null && query.endAt != null && query.limitToLast != null && query.limitToLast <= 50",
       "$slotKey": {
+        ".read": "auth != null",
         ".write": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || ((!data.exists() && newData.isString() && root.child('requestClaims').child(newData.val()).child('ownerUid').val() === auth.uid && root.child('requestClaims').child(newData.val()).child('type').val() === 'ar') || (data.isString() && newData.val() === data.val()) || (data.isString() && !newData.exists() && root.child('requestClaims').child(data.val()).child('ownerUid').val() === auth.uid && !root.child('arLogs').child(data.val()).exists())))",
         ".validate": "newData.isString() && newData.val().matches(/^[a-zA-Z0-9_-]{20,80}$/)"
       }

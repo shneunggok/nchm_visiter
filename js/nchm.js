@@ -663,12 +663,10 @@ function submitForm(type) {
                 switchTab("visit");
             })
             .catch((err) => {
-                logError("submitForm-ar", err);
-                if (err && err.code === "SLOT_TAKEN") {
-                    showMessage("방금 다른 이용자가 같은 시간을 먼저 예약했습니다. 다른 시간을 선택해 주세요.");
+                logError(`submitForm-ar.${err?.arStage || "unknown"}`, err);
+                showMessage(arReservationSaveErrorMessage(err));
+                if (getArReservationSaveErrorType(err) === "slot") {
                     generateTimeSlots();
-                } else {
-                    showMessage("저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
                 }
             })
             .finally(() => {
@@ -811,6 +809,9 @@ function initializePage() {
         .catch((error) => logError("auth-persistence", error));
 
     auth.onAuthStateChanged(async (user) => {
+        if (typeof isAdminAuthTransitioning === "function" && isAdminAuthTransitioning()) {
+            return;
+        }
         if (authResolved && user && user.isAnonymous) return;
         try {
             if (restoreAdminSession(user)) {
@@ -835,7 +836,7 @@ function initializePage() {
             resumePendingRequests();
         } catch (error) {
             logError("auth-restore", error);
-            showMessage("로그인 상태를 확인하지 못했습니다. 새로고침 후 다시 시도해 주세요.");
+            showMessage("사용자 인증에 실패했습니다. 새로고침 후 다시 시도해 주세요.");
         } finally {
             if (authLoading) authLoading.classList.add("hidden");
         }

@@ -61,13 +61,56 @@ const TV_PREVIEW_STORAGE_KEY = "nchm.tv.preview.v1";
 let navigationBound = false;
 let tvDestroyed = false;
 let tvRealtimeSubscribed = false;
+let tvRealtimeAuthUid = "";
+let tvSubscriptionGeneration = 0;
 let tvAuthStateUnsubscribe = null;
+let tvAuthRecoveryPromise = null;
+let tvAuthRecoveryTimer = null;
+let tvReconnectTimer = null;
+let tvSubscriptionHealthTimer = null;
+let tvRetrySignature = "";
+let tvRetryAttemptsBySignature = Object.create(null);
+let tvRetryTotalAttempts = 0;
+let tvRetryBlocked = false;
+let tvObservedAuthUid = "";
+let tvRequiredSubscriptionSources = new Set();
+let tvHealthySubscriptionSources = new Set();
+let tvRuntimeMetrics = {
+    subscriptionSets: 0,
+    authAttempts: 0,
+    retrySchedules: 0
+};
 let tvSubscribedDate = "";
 let tvEventsCache = null;
 let tvNoticesCache = null;
 let tvPreviewDraft = null;
 let tvHadActiveEvents = false;
 let tvHadActiveNotices = false;
+let tvConfiguredSlideEnabled = Object.assign({}, TV_CONFIG.enabledSlides);
+let tvContentAvailability = { events: null, notices: null };
+const TV_RETRY_DELAYS_MS = [
+    500,
+    2000,
+    5000,
+    15000,
+    30000,
+    60000,
+    120000,
+    180000,
+    300000,
+    300000
+];
+const TV_RETRY_JITTER_RATIO = 0.2;
+const TV_MAX_RETRY_ATTEMPTS = TV_RETRY_DELAYS_MS.length;
+const TV_SUBSCRIPTION_READY_TIMEOUT_MS = 60000;
+const TV_CORE_SUBSCRIPTION_SOURCES = [
+    "tvSettings",
+    "visitLogs",
+    "arSlotLocks",
+    "attendanceEvents",
+    "events",
+    "notices"
+];
 
 if (TV_PREVIEW_MODE) {
     try {
@@ -288,21 +331,238 @@ function renderContentError(container, message) {
     container.innerHTML = "<div class='tv-content-error' role='status'>" + escapeHtml(message) + "</div>";
 }
 
+function resetTvRealtimeSubscriptions() {
+    tvSubscriptionGeneration += 1;
+    window.clearTimeout(tvSubscriptionHealthTimer);
+    tvSubscriptionHealthTimer = null;
+    if (tvSettingsListener) tvSettingsListener.off();
+    if (visitorListener) visitorListener.off();
+    if (arListener) arListener.off();
+    if (typeof unsubscribeAttendanceBoards === "function") unsubscribeAttendanceBoards();
+    if (eventsListener) eventsListener.off();
+    if (noticesListener) noticesListener.off();
+
+    tvSettingsListener = null;
+    visitorListener = null;
+    arListener = null;
+    eventsListener = null;
+    noticesListener = null;
+    tvRealtimeSubscribed = false;
+    tvRealtimeAuthUid = "";
+    tvRequiredSubscriptionSources = new Set();
+    tvHealthySubscriptionSources = new Set();
+}
+
+function isTvSubscriptionGenerationCurrent(generation) {
+    return generation === tvSubscriptionGeneration && tvRealtimeSubscribed && !tvDestroyed;
+}
+
+function getTvRuntimeDiagnostics() {
+    var attendanceSubscriptions = typeof getTvAttendanceSubscriptionCount === "function"
+        ? getTvAttendanceSubscriptionCount()
+        : (typeof tvAttendanceState !== "undefined" && Array.isArray(tvAttendanceState.listeners)
+            ? tvAttendanceState.listeners.length
+            : 0);
+    var baseSubscriptions = [
+        tvSettingsListener,
+        visitorListener,
+        arListener,
+        eventsListener,
+        noticesListener
+    ].filter(Boolean).length;
+    return {
+        authUid: tvRealtimeAuthUid,
+        realtimeSubscribed: tvRealtimeSubscribed,
+        subscriptionGeneration: tvSubscriptionGeneration,
+        activeDatabaseSubscriptions: baseSubscriptions + attendanceSubscriptions,
+        requiredSources: tvRequiredSubscriptionSources.size,
+        healthySources: tvHealthySubscriptionSources.size,
+        activeTimers: [
+            slideTimer,
+            resumeTimer,
+            statusTimer,
+            eventImageTimer,
+            clockTimer,
+            tvAuthRecoveryTimer,
+            tvReconnectTimer,
+            tvSubscriptionHealthTimer
+        ].filter(Boolean).length,
+        retrySignature: tvRetrySignature,
+        retryAttempts: tvRetryTotalAttempts,
+        retryBlocked: tvRetryBlocked,
+        metrics: Object.assign({}, tvRuntimeMetrics)
+    };
+}
+
+function expectTvRealtimeSource(source, generation) {
+    if (!isTvSubscriptionGenerationCurrent(generation)) return;
+    tvRequiredSubscriptionSources.add(source);
+    tvHealthySubscriptionSources.delete(source);
+}
+
+function unexpectTvRealtimeSource(source, generation) {
+    if (!isTvSubscriptionGenerationCurrent(generation)) return;
+    tvRequiredSubscriptionSources.delete(source);
+    tvHealthySubscriptionSources.delete(source);
+}
+
+function resetTvRetryState() {
+    tvRetrySignature = "";
+    tvRetryAttemptsBySignature = Object.create(null);
+    tvRetryTotalAttempts = 0;
+    tvRetryBlocked = false;
+}
+
+function markTvRealtimeHealthy(source, generation) {
+    generation = generation === undefined ? tvSubscriptionGeneration : generation;
+    if (!isTvSubscriptionGenerationCurrent(generation)) return;
+    if (source) tvHealthySubscriptionSources.add(source);
+    var allReady = Array.from(tvRequiredSubscriptionSources).every(function(requiredSource) {
+        return tvHealthySubscriptionSources.has(requiredSource);
+    });
+    if (!allReady) return;
+    window.clearTimeout(tvSubscriptionHealthTimer);
+    tvSubscriptionHealthTimer = null;
+    resetTvRetryState();
+    setConnectionStatus("connected", "Firebase 연결됨");
+}
+
+function classifyTvFailure(error, fallbackCategory) {
+    var code = String(error && (error.code || error.message) || "").toLowerCase();
+    if (code.includes("permission_denied") || code.includes("permission-denied")) return "permission";
+    if (code.includes("network") || code.includes("disconnected") || code.includes("unavailable") ||
+        code.includes("timeout") || code.includes("offline") || code.includes("fetch")) return "network";
+    if (code.includes("auth/") || code.includes("token") || code.includes("credential") ||
+        code.includes("user-disabled") || code.includes("operation-not-allowed")) return "auth";
+    return fallbackCategory || "unknown";
+}
+
+function tvRetryDelayForAttempt(attempt, randomValue) {
+    var baseDelay = TV_RETRY_DELAYS_MS[Math.min(attempt, TV_RETRY_DELAYS_MS.length - 1)];
+    var random = Number.isFinite(randomValue) ? randomValue : Math.random();
+    // One-sided jitter keeps the documented five-minute ceiling while
+    // spreading multiple TV clients across the preceding minute.
+    var jitterMultiplier = 1 - TV_RETRY_JITTER_RATIO + (TV_RETRY_JITTER_RATIO * random);
+    return Math.max(100, Math.round(baseDelay * jitterMultiplier));
+}
+
+function tvRetryStatusText(category, blocked, delay) {
+    if (blocked) {
+        if (category === "permission") return "Firebase 권한 오류 · 인증 변경 대기 중";
+        if (category === "auth") return "Firebase 인증 복구 중단 · 네트워크 복구 대기 중";
+        return "Firebase 연결 복구 대기 중";
+    }
+    var seconds = Math.max(1, Math.ceil(delay / 1000));
+    if (category === "permission") return "Firebase 권한 재확인 중 · " + seconds + "초 후 재시도";
+    if (category === "auth") return "Firebase 인증 복구 중 · " + seconds + "초 후 재시도";
+    return "Firebase 네트워크 재연결 중 · " + seconds + "초 후 재시도";
+}
+
+function prepareTvRetry(category) {
+    var uid = auth.currentUser && auth.currentUser.uid || "signed-out";
+    var signature = category + "|" + uid;
+    tvRetrySignature = signature;
+    var attempt = Number(tvRetryAttemptsBySignature[signature] || 0);
+    if (tvRetryTotalAttempts >= TV_MAX_RETRY_ATTEMPTS) {
+        tvRetryBlocked = true;
+        setConnectionStatus("error", tvRetryStatusText(category, true, 0));
+        return null;
+    }
+    var delay = tvRetryDelayForAttempt(tvRetryTotalAttempts);
+    tvRetryAttemptsBySignature[signature] = attempt + 1;
+    tvRetryTotalAttempts += 1;
+    tvRuntimeMetrics.retrySchedules += 1;
+    setConnectionStatus("connecting", tvRetryStatusText(category, false, delay));
+    return delay;
+}
+
+function scheduleTvRealtimeReconnect(category) {
+    if (tvDestroyed || tvReconnectTimer) return false;
+    var failureCategory = category || "network";
+    var delay = prepareTvRetry(failureCategory);
+    if (delay === null) return false;
+    tvReconnectTimer = window.setTimeout(function() {
+        tvReconnectTimer = null;
+        var user = auth.currentUser;
+        if (user) {
+            if (failureCategory === "auth" && typeof user.getIdToken === "function") {
+                user.getIdToken(true)
+                    .then(function() {
+                        if (auth.currentUser && auth.currentUser.uid === user.uid) {
+                            subscribeTvRealtimeData(user, true);
+                        }
+                    })
+                    .catch(function(error) {
+                        console.error("[tv] auth token refresh error:", error && (error.code || error.message));
+                        scheduleTvRealtimeReconnect(classifyTvFailure(error, "auth"));
+                    });
+                return;
+            }
+            subscribeTvRealtimeData(user, true);
+            return;
+        }
+        scheduleTvAnonymousAuthRecovery(failureCategory);
+    }, delay);
+    return true;
+}
+
+function handleTvRealtimeSubscriptionError(source, error, generation) {
+    if (tvDestroyed || (generation !== undefined && !isTvSubscriptionGenerationCurrent(generation))) return;
+    console.error("[tv] " + source + " subscription error:", error && (error.code || error.message));
+
+    // A Realtime Database listener is permanently cancelled when it loses
+    // read permission. Detach the remaining listeners as one group so the
+    // next authenticated state can restore exactly one copy of each.
+    var category = classifyTvFailure(error, "network");
+    resetTvRealtimeSubscriptions();
+
+    if (!auth.currentUser) {
+        scheduleTvAnonymousAuthRecovery("auth");
+        return;
+    }
+    scheduleTvRealtimeReconnect(category);
+}
+
+function scheduleTvAnonymousAuthRecovery(category) {
+    if (tvDestroyed || auth.currentUser || tvAuthRecoveryPromise || tvAuthRecoveryTimer) return false;
+    var failureCategory = category || "auth";
+    var delay = prepareTvRetry(failureCategory);
+    if (delay === null) return false;
+    tvAuthRecoveryTimer = window.setTimeout(function() {
+        tvAuthRecoveryTimer = null;
+        if (tvDestroyed || auth.currentUser || tvAuthRecoveryPromise) return;
+        tvRuntimeMetrics.authAttempts += 1;
+        var retryCategory = "";
+        tvAuthRecoveryPromise = auth.signInAnonymously()
+            .catch(function(error) {
+                console.error("[tv] anonymous auth recovery error:", error && (error.code || error.message));
+                retryCategory = classifyTvFailure(error, "auth");
+            })
+            .finally(function() {
+                tvAuthRecoveryPromise = null;
+                if (retryCategory) scheduleTvAnonymousAuthRecovery(retryCategory);
+            });
+    }, delay);
+    return true;
+}
+
 // ==================== Firebase: TV Settings Subscription ====================
 
-function subscribeTVSettings() {
+function subscribeTVSettings(generation) {
     if (tvSettingsListener) tvSettingsListener.off();
     tvSettingsListener = tvSettingsRef;
     tvSettingsListener.on("value", function(snapshot) {
+        if (!isTvSubscriptionGenerationCurrent(generation)) return;
         var settings = TV_PREVIEW_MODE && tvPreviewDraft && tvPreviewDraft.settings
             ? tvPreviewDraft.settings
             : snapshot.val();
         if (!settings) {
-            setConnectionStatus("connected", "Firebase 연결됨 (기본 설정)");
+            markTvRealtimeHealthy("tvSettings", generation);
             return;
         }
 
         tvLastSettings = settings;
+        TV_CONFIG.enabledSlides = Object.assign({}, tvConfiguredSlideEnabled);
         // Update enabled slides and playlist from settings
         if (Array.isArray(settings.slides) && settings.slides.length) {
             var validSlides = TVCommon.normalizeFixedSlides(settings.slides).filter(function(slide) {
@@ -324,17 +584,19 @@ function subscribeTVSettings() {
                 }
             }
         }
+        tvConfiguredSlideEnabled = Object.assign({}, TV_CONFIG.enabledSlides);
+        applyTvContentAvailability("events");
+        applyTvContentAvailability("notices");
 
         // Update slide interval if configured
         if (Number(settings.slideInterval) >= 3000) TV_CONFIG.slideInterval = Number(settings.slideInterval);
         applyTVAppearance(settings);
         if (typeof setAttendanceSlidePreferences === "function") setAttendanceSlidePreferences(settings);
 
-        setConnectionStatus("connected", "Firebase 연결됨");
+        markTvRealtimeHealthy("tvSettings", generation);
         if (tvInitialized) startSlideshow();
     }, function(error) {
-        console.error("[tv] TV settings subscription error:", error);
-        setConnectionStatus("error", "Firebase 연결 오류");
+        handleTvRealtimeSubscriptionError("tvSettings", error, generation);
     });
 }
 
@@ -411,7 +673,8 @@ function applyTVAppearance(settings) {
 }
 
 // ==================== Firebase: Today's Visitors ====================
-function subscribeTodayVisitors() {
+function subscribeTodayVisitors(generation) {
+    generation = generation === undefined ? tvSubscriptionGeneration : generation;
     var todayStr = formatLocalDate(new Date());
     tvSubscribedDate = todayStr;
     var query = visitLogsRef.orderByChild("date").equalTo(todayStr).limitToLast(5000);
@@ -419,21 +682,23 @@ function subscribeTodayVisitors() {
     if (visitorListener) visitorListener.off();
     visitorListener = query;
     visitorListener.on("value", function(snapshot) {
+        if (!isTvSubscriptionGenerationCurrent(generation)) return;
         var count = snapshot.numChildren();
         if (TV_DOM.todayCount) {
             TV_DOM.todayCount.textContent = count;
         }
         var message = document.getElementById("tv-visitor-message");
         if (message) message.textContent = count ? "오늘 문화의집을 함께한 방문자입니다" : "오늘 첫 방문을 기다리고 있습니다";
+        markTvRealtimeHealthy("visitLogs", generation);
     }, function(error) {
-        console.error("[tv] subscribeTodayVisitors error:", error);
-        setConnectionStatus("error", "방문자 연결 오류");
+        handleTvRealtimeSubscriptionError("visitLogs", error, generation);
     });
 }
 
 // ==================== Firebase: AR Status ====================
 
-function subscribeARStatus() {
+function subscribeARStatus(generation) {
+    generation = generation === undefined ? tvSubscriptionGeneration : generation;
     var todayStr = formatLocalDate(new Date());
     tvSubscribedDate = todayStr;
     var query = arSlotLocksRef.orderByKey()
@@ -444,15 +709,16 @@ function subscribeARStatus() {
     if (arListener) arListener.off();
     arListener = query;
     arListener.on("value", function(snapshot) {
+        if (!isTvSubscriptionGenerationCurrent(generation)) return;
         var count = snapshot.numChildren();
         if (TV_DOM.arCount) {
             TV_DOM.arCount.textContent = count;
         }
         var message = document.getElementById("tv-ar-message");
         if (message) message.textContent = count ? "현재 예약된 AR 체험 팀입니다" : "현재 예약된 AR 체험 팀이 없습니다";
+        markTvRealtimeHealthy("arSlotLocks", generation);
     }, function(error) {
-        console.error("[tv] subscribeARStatus error:", error);
-        setConnectionStatus("error", "AR 예약 연결 오류");
+        handleTvRealtimeSubscriptionError("arSlotLocks", error, generation);
     });
 }
 
@@ -491,11 +757,22 @@ function leaveEventFullscreenMode(container, slideContent) {
     if (slideContent) slideContent.classList.remove("tv-slide-content--fullscreen-event");
 }
 
+function applyTvContentAvailability(slideId, hasContent) {
+    if (hasContent !== undefined) tvContentAvailability[slideId] = Boolean(hasContent);
+    var availability = tvContentAvailability[slideId];
+    if (availability === null) return;
+    var nextEnabled = tvConfiguredSlideEnabled[slideId] !== false && availability;
+    var changed = TV_CONFIG.enabledSlides[slideId] !== nextEnabled;
+    TV_CONFIG.enabledSlides[slideId] = nextEnabled;
+    if (changed && tvInitialized) startSlideshow();
+}
+
 function renderEvents(events) {
     var container = TV_DOM.eventsContainer;
     if (!container) return;
     var slideContent = container.closest(".tv-slide-content");
     if (!events || typeof events !== "object") {
+        applyTvContentAvailability("events", false);
         if (container.dataset.renderSignature === "empty") return;
         container.dataset.renderSignature = "empty";
         leaveEventFullscreenMode(container, slideContent);
@@ -518,6 +795,7 @@ function renderEvents(events) {
         }
 
         if (activeEvents.length === 0) {
+            applyTvContentAvailability("events", false);
             if (container.dataset.renderSignature === "empty") return;
             container.dataset.renderSignature = "empty";
             leaveEventFullscreenMode(container, slideContent);
@@ -526,6 +804,7 @@ function renderEvents(events) {
             tvHadActiveEvents = false;
             return;
         }
+        applyTvContentAvailability("events", true);
         tvHadActiveEvents = true;
 
         activeEvents = TVCommon.sortEvents(activeEvents.map(function(event, index) {
@@ -590,26 +869,30 @@ function renderEvents(events) {
         container.innerHTML = html;
 }
 
-function subscribeEvents() {
+function subscribeEvents(generation) {
     var eventsRef = db.ref("tvContent/events");
     if (eventsListener) eventsListener.off();
     eventsListener = eventsRef;
     eventsRef.on("value", function(snapshot) {
+        if (!isTvSubscriptionGenerationCurrent(generation)) return;
         tvEventsCache = snapshot.val();
         renderEvents(tvEventsCache);
+        markTvRealtimeHealthy("events", generation);
     }, function(error) {
-        console.error("[tv] subscribeEvents error:", error);
-        renderContentError(TV_DOM.eventsContainer, "이벤트 연결 오류");
+        if (!isTvSubscriptionGenerationCurrent(generation)) return;
+        if (tvEventsCache === null) renderContentError(TV_DOM.eventsContainer, "이벤트 연결 오류");
+        handleTvRealtimeSubscriptionError("events", error, generation);
     });
 }
 
 // ==================== Firebase: Notices ====================
 
-function renderNotices(notices) {
+    function renderNotices(notices) {
         var container = TV_DOM.noticesContainer;
         if (!container) return;
         var slideContent = container.closest(".tv-slide-content");
         if (!notices || typeof notices !== "object") {
+            applyTvContentAvailability("notices", false);
             if (container.dataset.renderSignature === "empty") return;
             container.dataset.renderSignature = "empty";
             container.classList.remove("tv-notices-container--fullscreen");
@@ -630,6 +913,7 @@ function renderNotices(notices) {
         }
 
         if (noticeList.length === 0) {
+            applyTvContentAvailability("notices", false);
             if (container.dataset.renderSignature === "empty") return;
             container.dataset.renderSignature = "empty";
             container.classList.remove("tv-notices-container--fullscreen");
@@ -639,6 +923,7 @@ function renderNotices(notices) {
             tvHadActiveNotices = false;
             return;
         }
+        applyTvContentAvailability("notices", true);
         tvHadActiveNotices = true;
 
         // Sort by creation date (newest first)
@@ -693,19 +978,22 @@ function renderNotices(notices) {
         container.innerHTML = html;
 }
 
-function subscribeNotices() {
+function subscribeNotices(generation) {
     var noticesRef = db.ref("tvContent/notices");
     if (noticesListener) noticesListener.off();
     noticesListener = noticesRef;
     noticesRef.on("value", function(snapshot) {
+        if (!isTvSubscriptionGenerationCurrent(generation)) return;
         tvNoticesCache = snapshot.val();
         if (TV_PREVIEW_MODE && tvPreviewDraft && tvPreviewDraft.notice) {
             tvNoticesCache = Object.assign({}, tvNoticesCache || {}, { __previewDraft: tvPreviewDraft.notice });
         }
         renderNotices(tvNoticesCache);
+        markTvRealtimeHealthy("notices", generation);
     }, function(error) {
-        console.error("[tv] subscribeNotices error:", error);
-        renderContentError(TV_DOM.noticesContainer, "공지사항 연결 오류");
+        if (!isTvSubscriptionGenerationCurrent(generation)) return;
+        if (tvNoticesCache === null) renderContentError(TV_DOM.noticesContainer, "공지사항 연결 오류");
+        handleTvRealtimeSubscriptionError("notices", error, generation);
     });
 }
 
@@ -757,18 +1045,72 @@ function setupKeyboardShortcuts() {
 
 // ==================== Initialize TV ====================
 
-function subscribeTvRealtimeData() {
-    if (tvRealtimeSubscribed || tvDestroyed) return;
+function subscribeTvRealtimeData(user, force) {
+    var authenticatedUser = user || auth.currentUser;
+    if (!authenticatedUser || tvDestroyed) return;
+    if (!force && tvRealtimeSubscribed && tvRealtimeAuthUid === authenticatedUser.uid) return;
+
+    resetTvRealtimeSubscriptions();
     tvRealtimeSubscribed = true;
-    tvSubscribedDate = formatLocalDate(new Date());
-    subscribeTVSettings();
-    subscribeTodayVisitors();
-    subscribeARStatus();
-    if (typeof subscribeAttendanceBoards === "function") {
-        subscribeAttendanceBoards();
+    tvRealtimeAuthUid = authenticatedUser.uid;
+    var generation = tvSubscriptionGeneration;
+    tvRequiredSubscriptionSources = new Set(TV_CORE_SUBSCRIPTION_SOURCES);
+    if (typeof subscribeAttendanceBoards !== "function") {
+        tvRequiredSubscriptionSources.delete("attendanceEvents");
     }
-    subscribeEvents();
-    subscribeNotices();
+    tvHealthySubscriptionSources = new Set();
+    tvRuntimeMetrics.subscriptionSets += 1;
+    tvSubscribedDate = formatLocalDate(new Date());
+    setConnectionStatus("connecting", "Firebase 데이터 연결 중...");
+    tvSubscriptionHealthTimer = window.setTimeout(function() {
+        tvSubscriptionHealthTimer = null;
+        if (!isTvSubscriptionGenerationCurrent(generation)) return;
+        handleTvRealtimeSubscriptionError(
+            "subscription-ready-timeout",
+            { code: "network-timeout" },
+            generation
+        );
+    }, TV_SUBSCRIPTION_READY_TIMEOUT_MS);
+    subscribeTVSettings(generation);
+    subscribeTodayVisitors(generation);
+    subscribeARStatus(generation);
+    if (typeof subscribeAttendanceBoards === "function") {
+        subscribeAttendanceBoards(generation);
+    }
+    subscribeEvents(generation);
+    subscribeNotices(generation);
+}
+
+function handleTvAuthStateChanged(user) {
+    window.clearTimeout(tvAuthRecoveryTimer);
+    tvAuthRecoveryTimer = null;
+    window.clearTimeout(tvReconnectTimer);
+    tvReconnectTimer = null;
+
+    if (user) {
+        var userChanged = tvObservedAuthUid !== user.uid;
+        tvObservedAuthUid = user.uid;
+        if (userChanged) resetTvRetryState();
+        subscribeTvRealtimeData(user);
+        return;
+    }
+
+    // Keep the last rendered values visible while authentication changes.
+    // The caches are intentionally not cleared here.
+    var signedOutStateChanged = tvObservedAuthUid !== "";
+    tvObservedAuthUid = "";
+    resetTvRealtimeSubscriptions();
+    if (signedOutStateChanged) resetTvRetryState();
+    scheduleTvAnonymousAuthRecovery("auth");
+}
+
+function subscribeTvAuthState() {
+    if (tvAuthStateUnsubscribe) tvAuthStateUnsubscribe();
+    tvAuthStateUnsubscribe = auth.onAuthStateChanged(handleTvAuthStateChanged, function(error) {
+        console.error("[tv] auth state error:", error && (error.code || error.message));
+        resetTvRealtimeSubscriptions();
+        scheduleTvAnonymousAuthRecovery(classifyTvFailure(error, "auth"));
+    });
 }
 
 function initializeTV() {
@@ -793,20 +1135,7 @@ function initializeTV() {
 
     // Restore a persisted administrator session before attaching protected
     // visit-log listeners. Only use anonymous auth when no session exists.
-    tvAuthStateUnsubscribe = auth.onAuthStateChanged(function(user) {
-        if (user) {
-            subscribeTvRealtimeData();
-            setConnectionStatus("connected", "Firebase 연결됨");
-            return;
-        }
-        auth.signInAnonymously().catch(function(e) {
-            console.error("[tv] auth error:", e);
-            setConnectionStatus("error", "인증 오류");
-        });
-    }, function(error) {
-        console.error("[tv] auth state error:", error && (error.code || error.message));
-        setConnectionStatus("error", "인증 상태 확인 오류");
-    });
+    subscribeTvAuthState();
 }
 
 function setupPreviewControls() {
@@ -831,22 +1160,54 @@ window.addEventListener("pagehide", function() {
     stopSlideshow();
     window.clearTimeout(resumeTimer);
     window.clearTimeout(statusTimer);
+    window.clearTimeout(tvAuthRecoveryTimer);
+    window.clearTimeout(tvReconnectTimer);
+    window.clearTimeout(tvSubscriptionHealthTimer);
     window.clearInterval(clockTimer);
     stopEventImageRotation();
     if (tvAuthStateUnsubscribe) tvAuthStateUnsubscribe();
-    if (tvSettingsListener) tvSettingsListener.off();
-    if (visitorListener) visitorListener.off();
-    if (arListener) arListener.off();
-    if (typeof unsubscribeAttendanceBoards === "function") unsubscribeAttendanceBoards();
-    if (eventsListener) eventsListener.off();
-    if (noticesListener) noticesListener.off();
+    resetTvRealtimeSubscriptions();
     if (TVCommon.shouldWriteStatus(TV_PREVIEW_MODE)) {
         db.ref("tvStatus").set({ online: false, lastSync: firebase.database.ServerValue.TIMESTAMP }).catch(function() {});
     }
 });
 
+window.addEventListener("pageshow", function(event) {
+    if (!tvDestroyed || !event.persisted) return;
+    tvDestroyed = false;
+    updateClock();
+    window.clearInterval(clockTimer);
+    clockTimer = window.setInterval(updateClock, 1000);
+    startSlideshow();
+    setConnectionStatus("connecting", "Firebase 데이터 연결 중...");
+    subscribeTvAuthState();
+});
+
+function resumeTvRecoveryFromEnvironment() {
+    if (tvDestroyed || (tvRealtimeSubscribed && !tvRetryBlocked)) return;
+    window.clearTimeout(tvAuthRecoveryTimer);
+    tvAuthRecoveryTimer = null;
+    window.clearTimeout(tvReconnectTimer);
+    tvReconnectTimer = null;
+    resetTvRetryState();
+    if (auth.currentUser) {
+        subscribeTvRealtimeData(auth.currentUser, true);
+    } else {
+        scheduleTvAnonymousAuthRecovery("auth");
+    }
+}
+
+window.addEventListener("online", function() {
+    resumeTvRecoveryFromEnvironment();
+});
+
+window.addEventListener("offline", function() {
+    if (!tvDestroyed) setConnectionStatus("connecting", "네트워크 연결 대기 중...");
+});
+
 document.addEventListener("visibilitychange", function() {
     if (document.visibilityState !== "visible" || tvDestroyed) return;
+    resumeTvRecoveryFromEnvironment();
     updateClock();
     if (typeof refreshAttendanceDateState === "function") refreshAttendanceDateState();
     renderEvents(tvEventsCache);

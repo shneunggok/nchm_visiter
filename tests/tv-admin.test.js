@@ -93,3 +93,182 @@ test("recommended TV backgrounds are complete, unique, and safely selectable", (
     copy.background = "#000000";
     assert.equal(common.backgroundPreset("midnight-mint").background, "#0B1220");
 });
+
+function createEditorModalHarness() {
+    const handlers = new Map();
+    const makeTarget = () => ({
+        isConnected: true,
+        handlers: new Map(),
+        addEventListener(type, handler) {
+            this.handlers.set(type, handler);
+        },
+        focus() {
+            this.focused = true;
+        }
+    });
+    const closeButtons = [makeTarget(), makeTarget()];
+    const firstInput = makeTarget();
+    const error = { textContent: "" };
+    const form = makeTarget();
+    form.elements = {
+        startDate: { value: "" },
+        endDate: { value: "", focus() {} }
+    };
+    form.reportValidity = () => true;
+    form.querySelector = () => firstInput;
+
+    const root = makeTarget();
+    root.hidden = true;
+    root.innerHTML = "";
+    root.querySelector = (selector) => selector === "#tv-editor-form" ? form : error;
+    root.querySelectorAll = () => closeButtons;
+    const modalSibling = makeTarget();
+    const modalParent = {
+        isConnected: true,
+        appendChild(child) {
+            child.parentNode = this;
+            child.nextSibling = null;
+        },
+        insertBefore(child, sibling) {
+            child.parentNode = this;
+            child.nextSibling = sibling;
+        }
+    };
+    root.parentNode = modalParent;
+    root.nextSibling = modalSibling;
+    modalSibling.parentNode = modalParent;
+
+    const returnFocus = makeTarget();
+    const body = {
+        style: { overflow: "clip" },
+        appendChild(child) {
+            child.parentNode = this;
+            child.nextSibling = null;
+        }
+    };
+    const document = {
+        activeElement: returnFocus,
+        body,
+        getElementById: (id) => id === "tv-content-modal" ? root : null,
+        addEventListener(type, handler) {
+            handlers.set(type, handler);
+        },
+        removeEventListener(type, handler) {
+            if (handlers.get(type) === handler) handlers.delete(type);
+        }
+    };
+    const modalContext = {
+        console,
+        document,
+        window: { addEventListener() {} },
+        TVCommon: {},
+        escapeHtml: (value) => String(value),
+        FormData: class {
+            entries() {
+                return [["title", "테스트"]];
+            }
+        }
+    };
+    modalContext.globalThis = modalContext;
+    vm.createContext(modalContext);
+    vm.runInContext(
+        fs.readFileSync(path.join(__dirname, "../js/tv-admin.js"), "utf8"),
+        modalContext
+    );
+    return {
+        modalContext,
+        document,
+        root,
+        form,
+        closeButtons,
+        firstInput,
+        returnFocus,
+        handlers,
+        modalParent,
+        modalSibling
+    };
+}
+
+test("TV editor modal restores the previous page scroll state on every central close", async () => {
+    const harness = createEditorModalHarness();
+    const result = harness.modalContext.tvOpenEditorModal({
+        title: "출석 이벤트 수정",
+        submitLabel: "수정 저장",
+        fields: "<input name=\"title\">"
+    });
+
+    assert.equal(harness.root.hidden, false);
+    assert.equal(harness.document.body.style.overflow, "hidden");
+    assert.equal(harness.root.parentNode, harness.document.body);
+    assert.equal(harness.firstInput.focused, true);
+    assert.equal(harness.handlers.has("keydown"), true);
+
+    harness.closeButtons[0].handlers.get("click")();
+    assert.equal(await result, null);
+    assert.equal(harness.root.hidden, true);
+    assert.equal(harness.document.body.style.overflow, "clip");
+    assert.equal(harness.handlers.has("keydown"), false);
+    assert.equal(harness.returnFocus.focused, true);
+    assert.equal(harness.root.parentNode, harness.modalParent);
+    assert.equal(harness.root.nextSibling, harness.modalSibling);
+});
+
+test("TV editor modal ESC close cannot leave a duplicate key listener or body lock", async () => {
+    const harness = createEditorModalHarness();
+    const result = harness.modalContext.tvOpenEditorModal({
+        title: "행사 수정",
+        submitLabel: "수정 저장",
+        fields: "<input name=\"title\">"
+    });
+    let prevented = false;
+    harness.handlers.get("keydown")({
+        key: "Escape",
+        preventDefault() {
+            prevented = true;
+        }
+    });
+
+    assert.equal(await result, null);
+    assert.equal(prevented, true);
+    assert.equal(harness.document.body.style.overflow, "clip");
+    assert.equal(harness.handlers.size, 0);
+});
+
+test("TV editor modal submit and backdrop close use the same cleanup path", async () => {
+    const submitHarness = createEditorModalHarness();
+    const submitResult = submitHarness.modalContext.tvOpenEditorModal({
+        title: "출석 이벤트 수정",
+        submitLabel: "수정 저장",
+        fields: "<input name=\"title\">"
+    });
+    submitHarness.form.handlers.get("submit")({ preventDefault() {} });
+    assert.equal((await submitResult).title, "테스트");
+    assert.equal(submitHarness.document.body.style.overflow, "clip");
+    assert.equal(submitHarness.handlers.size, 0);
+
+    const backdropHarness = createEditorModalHarness();
+    const backdropResult = backdropHarness.modalContext.tvOpenEditorModal({
+        title: "행사 수정",
+        submitLabel: "수정 저장",
+        fields: "<input name=\"title\">"
+    });
+    backdropHarness.root.onclick({ target: backdropHarness.root });
+    assert.equal(await backdropResult, null);
+    assert.equal(backdropHarness.document.body.style.overflow, "clip");
+    assert.equal(backdropHarness.handlers.size, 0);
+    assert.equal(backdropHarness.root.onclick, null);
+});
+
+test("TV editor CSS assigns overflow to the form body for wheel and touch scrolling", () => {
+    const css = fs.readFileSync(path.join(__dirname, "../tv-admin.css"), "utf8");
+    const bodyRule = css.match(/\.tv-admin-dialog-body\s*\{([^}]+)\}/)?.[1] || "";
+    const dialogRule = css.match(/\.tv-admin-dialog\s*\{([^}]+)\}/)?.[1] || "";
+
+    assert.match(dialogRule, /display:\s*flex/);
+    assert.match(dialogRule, /overflow:\s*hidden/);
+    assert.match(bodyRule, /overflow-y:\s*auto/);
+    assert.match(bodyRule, /overscroll-behavior:\s*contain/);
+    assert.match(bodyRule, /touch-action:\s*pan-y/);
+    assert.match(bodyRule, /-webkit-overflow-scrolling:\s*touch/);
+    assert.match(css, /100dvh/);
+});

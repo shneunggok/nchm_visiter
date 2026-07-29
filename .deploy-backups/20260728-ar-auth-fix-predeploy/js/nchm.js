@@ -112,7 +112,6 @@ function deleteVisitLog(key) {
     db.ref().update(updates)
         .then(() => {
             invalidateAdminStatsCache("visit");
-            invalidateAdminLegacyVisitCache();
             showMessage("삭제되었습니다.", "info");
             return Promise.all([
                 loadAdminLogPage("visit"),
@@ -358,9 +357,6 @@ function generateTimeSlots() {
 function setFilter(type) {
     currentFilter = type;
     if (isAdminUser) {
-        if (typeof cancelAdminExportLoads === "function") {
-            cancelAdminExportLoads();
-        }
         if (typeof cancelAdminStatisticsLoads === "function") {
             cancelAdminStatisticsLoads();
         }
@@ -493,7 +489,7 @@ function updateAdminDashboard() {
     renderStatsTable(arStats, ["AR 이용"], "ar-stats-body", "ar-stats-footer", "ar-sum-col");
 
     dom.visitLogBody.innerHTML = "";
-    filteredVisitLogs.forEach((log) => {
+    filteredVisitLogs.slice().reverse().forEach((log) => {
         const tr = document.createElement("tr");
         tr.className = "border-b hover:bg-slate-50";
 
@@ -667,10 +663,12 @@ function submitForm(type) {
                 switchTab("visit");
             })
             .catch((err) => {
-                logError(`submitForm-ar.${err?.arStage || "unknown"}`, err);
-                showMessage(arReservationSaveErrorMessage(err));
-                if (getArReservationSaveErrorType(err) === "slot") {
+                logError("submitForm-ar", err);
+                if (err && err.code === "SLOT_TAKEN") {
+                    showMessage("방금 다른 이용자가 같은 시간을 먼저 예약했습니다. 다른 시간을 선택해 주세요.");
                     generateTimeSlots();
+                } else {
+                    showMessage("저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
                 }
             })
             .finally(() => {
@@ -682,6 +680,45 @@ function submitForm(type) {
                 }
             });
     }
+}
+
+function exportToExcel(type) {
+    let csvContent = "\uFEFF";
+    let fileName = "";
+
+    if (type === "visit") {
+        const filtered = visitLogs.filter((log) => isDateInRange(log.date));
+        if (filtered.length === 0) {
+            showMessage("다운로드할 데이터가 없습니다.", "info");
+            return;
+        }
+        csvContent += "날짜,시간,이름,성별,나이,이용목적\n";
+        filtered.forEach((log) => {
+            csvContent += `${sanitizeCsvField(log.date)},${sanitizeCsvField(log.time)},${sanitizeCsvField(log.name)},${sanitizeCsvField(log.gender)},${sanitizeCsvField((log.age || "").split("(")[0])},"${sanitizeCsvField(toArray(log.purposes).join(", "))}"\n`;
+        });
+        fileName = `방문등록_${formatLocalDate(new Date())}.csv`;
+    } else {
+        const filtered = arLogs.filter((log) => isDateInRange(log.date));
+        if (filtered.length === 0) {
+            showMessage("다운로드할 데이터가 없습니다.", "info");
+            return;
+        }
+        csvContent += "예약날짜,예약시간,대표자,총인원,이용자상세\n";
+        filtered.forEach((log) => {
+            const users = toArray(log.users);
+            const details = users.filter(Boolean).map((user) => `${user.name || ""}(${user.gender || ""}/${(user.age || "").split("(")[0]})`).join(" | ");
+            csvContent += `${sanitizeCsvField(log.date)},${sanitizeCsvField(log.timeSlot)},${sanitizeCsvField(users[0]?.name || "")},${users.length},"${sanitizeCsvField(details)}"\n`;
+        });
+        fileName = `AR예약_${formatLocalDate(new Date())}.csv`;
+    }
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", fileName);
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function initFilterOptions() {
@@ -757,9 +794,6 @@ function initializePage() {
     [dom.filterYearSelect, dom.filterMonthSelect, dom.startDate, dom.endDate].forEach((input) => {
         input?.addEventListener("change", () => {
             if (isAdminUser && typeof cancelAdminStatisticsLoads === "function") {
-                if (typeof cancelAdminExportLoads === "function") {
-                    cancelAdminExportLoads();
-                }
                 cancelAdminStatisticsLoads();
                 cancelAdminLogLoads();
                 updateAdminDashboard();
@@ -777,9 +811,6 @@ function initializePage() {
         .catch((error) => logError("auth-persistence", error));
 
     auth.onAuthStateChanged(async (user) => {
-        if (typeof isAdminAuthTransitioning === "function" && isAdminAuthTransitioning()) {
-            return;
-        }
         if (authResolved && user && user.isAnonymous) return;
         try {
             if (restoreAdminSession(user)) {
@@ -804,7 +835,7 @@ function initializePage() {
             resumePendingRequests();
         } catch (error) {
             logError("auth-restore", error);
-            showMessage("사용자 인증에 실패했습니다. 새로고침 후 다시 시도해 주세요.");
+            showMessage("로그인 상태를 확인하지 못했습니다. 새로고침 후 다시 시도해 주세요.");
         } finally {
             if (authLoading) authLoading.classList.add("hidden");
         }

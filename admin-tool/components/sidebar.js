@@ -60,6 +60,8 @@ window.AT_Sidebar = {
             btn.className = "at-tab-btn";
         });
 
+
+
         if (tabId === "visit-logs") {
             if (visitSection) visitSection.classList.remove("at-hidden");
             var activeBtn = document.querySelector('[data-at-tab="visit-logs"]');

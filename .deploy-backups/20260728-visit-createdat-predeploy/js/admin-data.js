@@ -1,7 +1,5 @@
 const ADMIN_LOG_PAGE_SIZE = 100;
-const ADMIN_LOG_QUERY_OVERFETCH = 2;
 const ADMIN_STATS_PAGE_SIZE = 400;
-const ADMIN_EXPORT_PAGE_SIZE = 400;
 const ADMIN_STATS_CACHE_VERSION = 1;
 const ADMIN_STATS_CACHE_TTL_MS = 5 * 60 * 1000;
 const ADMIN_STATS_CACHE_STORAGE_KEY = "nchm.admin.period-stats.v1";
@@ -31,8 +29,6 @@ const adminLogPagers = {
 
 let adminStatsRequestVersion = 0;
 let adminStatsActiveSignature = "";
-let adminLegacyVisitRecords = null;
-let adminLegacyVisitLoadPromise = null;
 const adminStatsMemoryCache = new Map();
 const adminPeriodStats = {
     visit: null,
@@ -41,10 +37,6 @@ const adminPeriodStats = {
 const adminStatsProgress = {
     visit: { status: "idle", processed: 0, fromCache: false, error: null },
     ar: { status: "idle", processed: 0, fromCache: false, error: null }
-};
-const adminExportStates = {
-    visit: { loading: false, requestVersion: 0, processed: 0 },
-    ar: { loading: false, requestVersion: 0, processed: 0 }
 };
 
 function createAdminStatsMatrix(categories) {
@@ -135,358 +127,6 @@ function getAdminDateRange() {
         return { start, end, filter: "custom" };
     }
     return { start: "", end: "", filter: "all" };
-}
-
-function adminExportButtonId(type) {
-    return `${type}-period-csv-btn`;
-}
-
-function updateAdminExportButton(type) {
-    if (typeof document === "undefined") return;
-    const state = adminExportStates[type];
-    const button = document.getElementById(adminExportButtonId(type));
-    if (!state || !button) return;
-    const label = button.querySelector?.("[data-export-label]");
-    button.disabled = state.loading;
-    button.setAttribute?.("aria-busy", state.loading ? "true" : "false");
-    const text = state.loading
-        ? `${formatAdminStatNumber(state.processed)}건 불러오는 중`
-        : "선택 기간 전체 CSV";
-    if (label) {
-        label.textContent = text;
-    } else {
-        button.textContent = text;
-    }
-}
-
-function setAdminExportLoading(type, loading, processed = 0) {
-    const state = adminExportStates[type];
-    if (!state) return;
-    state.loading = loading;
-    state.processed = processed;
-    updateAdminExportButton(type);
-}
-
-function isAdminExportRequestActive(type, requestVersion) {
-    const state = adminExportStates[type];
-    return Boolean(state)
-        && state.requestVersion === requestVersion
-        && (typeof isAdminUser === "undefined" || isAdminUser);
-}
-
-function cancelAdminExportLoads(type) {
-    const types = type ? [type] : Object.keys(adminExportStates);
-    types.forEach((name) => {
-        const state = adminExportStates[name];
-        if (!state) return;
-        state.requestVersion += 1;
-        setAdminExportLoading(name, false, 0);
-    });
-}
-
-function getAdminExportTimeMinutes(type, record) {
-    const rawTime = type === "visit" ? record?.time : record?.timeSlot;
-    const match = typeof rawTime === "string"
-        ? rawTime.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/)
-        : null;
-    return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
-}
-
-function compareAdminExportRecords(type, first, second) {
-    const firstDate = isValidDateKey(first?.date) ? first.date : "";
-    const secondDate = isValidDateKey(second?.date) ? second.date : "";
-    if (firstDate !== secondDate) return secondDate.localeCompare(firstDate);
-
-    const timeDifference = getAdminExportTimeMinutes(type, second)
-        - getAdminExportTimeMinutes(type, first);
-    if (timeDifference) return timeDifference;
-
-    const firstCreatedAt = Number.isFinite(first?.createdAt) ? first.createdAt : 0;
-    const secondCreatedAt = Number.isFinite(second?.createdAt) ? second.createdAt : 0;
-    if (firstCreatedAt !== secondCreatedAt) return secondCreatedAt - firstCreatedAt;
-    return -compareAdminFirebaseKeys(first?._key || "", second?._key || "");
-}
-
-async function loadAdminExportRecords(type, range, requestVersion, onProgress) {
-    const ref = type === "visit" ? visitLogsRef : arLogsRef;
-    const records = [];
-    const seenKeys = new Set();
-    let anchor = null;
-
-    while (isAdminExportRequestActive(type, requestVersion)) {
-        let query = ref.orderByChild("date");
-        if (range.start) query = query.startAt(range.start);
-        if (anchor) {
-            query = query.endAt(anchor.date, anchor.key);
-        } else if (range.end) {
-            query = query.endAt(range.end);
-        }
-        query = query.limitToLast(ADMIN_EXPORT_PAGE_SIZE + 1);
-
-        const snapshot = await query.once("value");
-        if (!isAdminExportRequestActive(type, requestVersion)) return null;
-
-        let page = [];
-        snapshot.forEach((child) => {
-            const value = child.val();
-            page.push({
-                key: child.key,
-                date: value && typeof value === "object" ? value.date ?? null : null,
-                value
-            });
-        });
-        const hasMore = page.length > ADMIN_EXPORT_PAGE_SIZE;
-        if (anchor) {
-            page = page.filter((entry) =>
-                !(entry.key === anchor.key && entry.date === anchor.date)
-            );
-        }
-        if (page.length > ADMIN_EXPORT_PAGE_SIZE) {
-            page = page.slice(page.length - ADMIN_EXPORT_PAGE_SIZE);
-        }
-
-        page.forEach((entry) => {
-            if (!entry.value || typeof entry.value !== "object" || seenKeys.has(entry.key)) return;
-            seenKeys.add(entry.key);
-            records.push({ _key: entry.key, ...entry.value });
-        });
-        if (typeof onProgress === "function") onProgress(records.length);
-
-        if (!hasMore || page.length === 0) break;
-        const oldest = page[0];
-        const nextAnchor = { date: oldest.date, key: oldest.key };
-        if (anchor && anchor.date === nextAnchor.date && anchor.key === nextAnchor.key) {
-            const error = new Error("ADMIN_EXPORT_CURSOR_STALLED");
-            error.code = "ADMIN_EXPORT_CURSOR_STALLED";
-            throw error;
-        }
-        anchor = nextAnchor;
-    }
-
-    if (!isAdminExportRequestActive(type, requestVersion)) return null;
-    records.sort((first, second) => compareAdminExportRecords(type, first, second));
-    return records;
-}
-
-function createAdminPeriodCsv(type, records) {
-    const rows = [];
-    if (type === "visit") {
-        rows.push(["날짜", "시간", "이름", "성별", "나이", "이용목적"]);
-        records.forEach((record) => {
-            rows.push([
-                record.date,
-                record.time,
-                record.name,
-                record.gender,
-                (record.age || "").split("(")[0],
-                toArray(record.purposes).join(", ")
-            ]);
-        });
-    } else {
-        rows.push(["예약날짜", "예약시간", "대표자", "총인원", "이용자상세"]);
-        records.forEach((record) => {
-            const users = toArray(record.users).filter((user) =>
-                user && typeof user === "object"
-            );
-            const details = users.map((user) =>
-                `${user.name || ""}(${user.gender || ""}/${(user.age || "").split("(")[0]})`
-            ).join(" | ");
-            rows.push([
-                record.date,
-                record.timeSlot,
-                users[0]?.name || "",
-                users.length,
-                details
-            ]);
-        });
-    }
-    return "\uFEFF" + rows
-        .map((row) => row.map((value) => escapeCsvCell(value)).join(","))
-        .join("\r\n") + "\r\n";
-}
-
-function adminExportFileName(type, range) {
-    const label = range.start && range.end
-        ? `${range.start}_${range.end}`
-        : "전체";
-    return `${type === "visit" ? "방문등록" : "AR예약"}_${label}.csv`;
-}
-
-function saveAdminCsvFile(content, fileName) {
-    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", fileName);
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-async function exportAdminPeriodCsv(type) {
-    const state = adminExportStates[type];
-    if (!state || state.loading) return false;
-    if (typeof isAdminUser !== "undefined" && !isAdminUser) {
-        showMessage("관리자 로그인 후 다운로드해 주세요.");
-        return false;
-    }
-
-    let range;
-    try {
-        range = getAdminDateRange();
-    } catch (error) {
-        showMessage("조회 시작일과 종료일을 올바르게 입력해 주세요.");
-        return false;
-    }
-
-    const requestVersion = ++state.requestVersion;
-    setAdminExportLoading(type, true, 0);
-    try {
-        const records = await loadAdminExportRecords(
-            type,
-            range,
-            requestVersion,
-            (processed) => {
-                if (!isAdminExportRequestActive(type, requestVersion)) return;
-                state.processed = processed;
-                updateAdminExportButton(type);
-            }
-        );
-        if (!records || !isAdminExportRequestActive(type, requestVersion)) return false;
-        if (records.length === 0) {
-            showMessage("선택한 기간에 다운로드할 데이터가 없습니다.", "info");
-            return false;
-        }
-        saveAdminCsvFile(
-            createAdminPeriodCsv(type, records),
-            adminExportFileName(type, range)
-        );
-        showMessage(`${formatAdminStatNumber(records.length)}건 CSV 다운로드를 완료했습니다.`, "success");
-        return true;
-    } catch (error) {
-        if (!isAdminExportRequestActive(type, requestVersion)) return false;
-        logError(`admin-${type}-csv-export`, error);
-        showMessage("전체 기간 데이터를 불러오지 못했습니다. 네트워크 연결 후 다시 시도해 주세요.");
-        return false;
-    } finally {
-        if (state.requestVersion === requestVersion) {
-            setAdminExportLoading(type, false, 0);
-        }
-    }
-}
-
-function parseAdminLocalDateTimestamp(dateKey, endOfDay = false) {
-    if (!isValidDateKey(dateKey)) return null;
-    const [year, month, day] = dateKey.split("-").map(Number);
-    const timestamp = endOfDay
-        ? new Date(year, month - 1, day, 23, 59, 59, 999).getTime()
-        : new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
-    return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-function getAdminTimestampRange(range) {
-    const start = range.start ? parseAdminLocalDateTimestamp(range.start) : 0;
-    const end = range.end
-        ? parseAdminLocalDateTimestamp(range.end, true)
-        : Number.MAX_SAFE_INTEGER;
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) {
-        const error = new Error("INVALID_DATE_RANGE");
-        error.code = "INVALID_DATE_RANGE";
-        throw error;
-    }
-    return { start, end };
-}
-
-function getLegacyVisitTimestamp(record) {
-    const dateStart = parseAdminLocalDateTimestamp(record?.date);
-    if (!Number.isFinite(dateStart)) return 0;
-    const match = typeof record.time === "string"
-        ? record.time.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/)
-        : null;
-    if (!match) return dateStart;
-    return dateStart + (Number(match[1]) * 60 + Number(match[2])) * 60 * 1000;
-}
-
-function getFirebaseIntegerKey(key) {
-    const value = String(key);
-    if (!/^-?(0*)\d{1,10}$/.test(value)) return null;
-    const parsed = Number(value);
-    return Number.isInteger(parsed) && parsed >= -2147483648 && parsed <= 2147483647
-        ? parsed
-        : null;
-}
-
-function compareAdminFirebaseKeys(firstKeyValue, secondKeyValue) {
-    const firstKey = String(firstKeyValue);
-    const secondKey = String(secondKeyValue);
-    if (firstKey === secondKey) return 0;
-    const firstInteger = getFirebaseIntegerKey(firstKey);
-    const secondInteger = getFirebaseIntegerKey(secondKey);
-    if (firstInteger !== null) {
-        if (secondInteger !== null) {
-            return firstInteger === secondInteger
-                ? firstKey.length - secondKey.length
-                : firstInteger - secondInteger;
-        }
-        return -1;
-    }
-    if (secondInteger !== null) return 1;
-    return firstKey < secondKey ? -1 : 1;
-}
-
-function compareVisitRecordsNewest(first, second) {
-    const timestampDifference = second._sortCreatedAt - first._sortCreatedAt;
-    if (timestampDifference) return timestampDifference;
-    return -compareAdminFirebaseKeys(first._key, second._key);
-}
-
-function isVisitRecordOlderThanCursor(record, cursor) {
-    if (!cursor) return true;
-    if (record._sortCreatedAt !== cursor.createdAt) {
-        return record._sortCreatedAt < cursor.createdAt;
-    }
-    return compareAdminFirebaseKeys(record._key, cursor.key) < 0;
-}
-
-function isLegacyVisitInRange(record, range) {
-    if (!isValidDateKey(record?.date)) return range.filter === "all";
-    if (range.start && record.date < range.start) return false;
-    if (range.end && record.date > range.end) return false;
-    return true;
-}
-
-function invalidateAdminLegacyVisitCache() {
-    adminLegacyVisitRecords = null;
-    adminLegacyVisitLoadPromise = null;
-}
-
-function loadAdminLegacyVisitRecords() {
-    if (adminLegacyVisitRecords) return Promise.resolve(adminLegacyVisitRecords);
-    if (adminLegacyVisitLoadPromise) return adminLegacyVisitLoadPromise;
-
-    adminLegacyVisitLoadPromise = visitLogsRef
-        .orderByChild("createdAt")
-        .equalTo(null)
-        .once("value")
-        .then((snapshot) => {
-            const records = [];
-            snapshot.forEach((child) => {
-                const value = child.val();
-                if (!value || typeof value !== "object" || Number.isFinite(value.createdAt)) return;
-                records.push({
-                    _key: child.key,
-                    ...value,
-                    _sortCreatedAt: getLegacyVisitTimestamp(value),
-                    _legacyCreatedAt: true
-                });
-            });
-            records.sort(compareVisitRecordsNewest);
-            adminLegacyVisitRecords = records;
-            return records;
-        })
-        .finally(() => {
-            adminLegacyVisitLoadPromise = null;
-        });
-    return adminLegacyVisitLoadPromise;
 }
 
 function setAdminPagerLoading(type, loading) {
@@ -826,81 +466,35 @@ async function loadAdminLogPage(type, options = {}) {
         return;
     }
 
+    const anchor = pager.anchors[pager.pageIndex] || null;
+    let query = pager.ref.orderByChild("date");
+    if (range.start) query = query.startAt(range.start);
+    if (anchor) {
+        query = query.endAt(anchor.date, anchor.key).limitToLast(ADMIN_LOG_PAGE_SIZE + 2);
+    } else {
+        if (range.end) query = query.endAt(range.end);
+        query = query.limitToLast(ADMIN_LOG_PAGE_SIZE + 1);
+    }
+
     try {
-        const anchor = pager.anchors[pager.pageIndex] || null;
-        let records;
+        const snapshot = await query.once("value");
+        if (requestVersion !== pager.requestVersion || !isAdminUser) return;
 
-        if (type === "visit") {
-            const timestampRange = getAdminTimestampRange(range);
-            let query = pager.ref
-                .orderByChild("createdAt")
-                .startAt(timestampRange.start);
-            query = anchor
-                ? query.endAt(anchor.createdAt, anchor.key)
-                : query.endAt(timestampRange.end);
-            query = query.limitToLast(ADMIN_LOG_PAGE_SIZE + ADMIN_LOG_QUERY_OVERFETCH);
-
-            const [snapshot, legacyRecords] = await Promise.all([
-                query.once("value"),
-                loadAdminLegacyVisitRecords()
-            ]);
-            if (requestVersion !== pager.requestVersion || !isAdminUser) return;
-
-            const candidates = [];
-            snapshot.forEach((child) => {
-                const value = child.val();
-                if (!value || typeof value !== "object" || !Number.isFinite(value.createdAt)) return;
-                const record = {
-                    _key: child.key,
-                    ...value,
-                    _sortCreatedAt: value.createdAt,
-                    _legacyCreatedAt: false
-                };
-                if (isVisitRecordOlderThanCursor(record, anchor)) candidates.push(record);
-            });
-            let legacyCandidateCount = 0;
-            for (const record of legacyRecords) {
-                if (isLegacyVisitInRange(record, range) &&
-                    isVisitRecordOlderThanCursor(record, anchor)) {
-                    candidates.push(record);
-                    legacyCandidateCount += 1;
-                    if (legacyCandidateCount >=
-                        ADMIN_LOG_PAGE_SIZE + ADMIN_LOG_QUERY_OVERFETCH) break;
-                }
+        let records = [];
+        snapshot.forEach((child) => {
+            const value = child.val();
+            if (value && typeof value === "object") {
+                records.push({ _key: child.key, ...value });
             }
-            candidates.sort(compareVisitRecordsNewest);
-            pager.hasNext = candidates.length > ADMIN_LOG_PAGE_SIZE;
-            records = candidates.slice(0, ADMIN_LOG_PAGE_SIZE);
-        } else {
-            let query = pager.ref.orderByChild("date");
-            if (range.start) query = query.startAt(range.start);
-            if (anchor) {
-                query = query.endAt(anchor.date, anchor.key)
-                    .limitToLast(ADMIN_LOG_PAGE_SIZE + ADMIN_LOG_QUERY_OVERFETCH);
-            } else {
-                if (range.end) query = query.endAt(range.end);
-                query = query.limitToLast(ADMIN_LOG_PAGE_SIZE + 1);
-            }
-
-            const snapshot = await query.once("value");
-            if (requestVersion !== pager.requestVersion || !isAdminUser) return;
-
-            records = [];
-            snapshot.forEach((child) => {
-                const value = child.val();
-                if (value && typeof value === "object") {
-                    records.push({ _key: child.key, ...value });
-                }
-            });
-            if (anchor) {
-                records = records.filter((record) =>
-                    !(record._key === anchor.key && (record.date ?? null) === anchor.date)
-                );
-            }
-            pager.hasNext = records.length > ADMIN_LOG_PAGE_SIZE;
-            if (pager.hasNext) {
-                records = records.slice(records.length - ADMIN_LOG_PAGE_SIZE);
-            }
+        });
+        if (anchor) {
+            records = records.filter((record) =>
+                !(record._key === anchor.key && (record.date ?? null) === anchor.date)
+            );
+        }
+        pager.hasNext = records.length > ADMIN_LOG_PAGE_SIZE;
+        if (pager.hasNext) {
+            records = records.slice(records.length - ADMIN_LOG_PAGE_SIZE);
         }
         pager.assign(records);
         updateAdminDashboard();
@@ -921,13 +515,9 @@ function moveAdminLogPage(type, direction) {
     if (!pager || pager.loading) return;
     if (direction === "next") {
         if (!pager.hasNext || !pager.records().length) return;
-        const oldest = type === "visit"
-            ? pager.records()[pager.records().length - 1]
-            : pager.records()[0];
+        const oldest = pager.records()[0];
         pager.anchors = pager.anchors.slice(0, pager.pageIndex + 1);
-        pager.anchors.push(type === "visit"
-            ? { createdAt: oldest._sortCreatedAt, key: oldest._key }
-            : { date: oldest.date ?? null, key: oldest._key });
+        pager.anchors.push({ date: oldest.date ?? null, key: oldest._key });
         pager.pageIndex += 1;
     } else if (direction === "prev") {
         if (pager.pageIndex === 0) return;

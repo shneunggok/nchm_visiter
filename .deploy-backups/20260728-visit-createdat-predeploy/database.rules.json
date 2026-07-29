@@ -1,0 +1,136 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "requestClaims": {
+      ".indexOn": ["createdAt", "date", "status"],
+      "$requestId": {
+        ".read": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || !data.exists() || data.child('ownerUid').val() === auth.uid)",
+        ".write": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || ($requestId.matches(/^[a-zA-Z0-9_-]{20,80}$/) && ((!data.exists() && newData.child('ownerUid').val() === auth.uid) || (data.child('ownerUid').val() === auth.uid && newData.child('ownerUid').val() === auth.uid && newData.child('type').val() === data.child('type').val() && newData.child('payloadHash').val() === data.child('payloadHash').val() && newData.child('date').val() === data.child('date').val() && newData.child('createdAt').val() === data.child('createdAt').val()))))",
+        ".validate": "newData.hasChildren(['ownerUid','type','payloadHash','date','status','createdAt'])",
+        "ownerUid": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+        "type": { ".validate": "newData.val() === 'visit' || newData.val() === 'ar'" },
+        "payloadHash": { ".validate": "newData.isString() && newData.val().matches(/^[a-zA-Z0-9_-]{8,80}$/)" },
+        "date": { ".validate": "newData.isString() && newData.val().matches(/^(19|20)[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$/)" },
+        "status": { ".validate": "newData.val() === 'pending' || newData.val() === 'complete'" },
+        "createdAt": { ".validate": "newData.isNumber() && newData.val() <= now && newData.val() >= now - 900000" },
+        "completedAt": { ".validate": "newData.isNumber() && newData.val() === newData.parent().child('createdAt').val()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "visitLogs": {
+      ".indexOn": ["date", "requestId"],
+      ".read": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || (query.orderByChild === 'date' && query.limitToLast != null && query.limitToLast <= 5000 && (query.equalTo != null || (query.startAt != null && query.endAt != null))))",
+      "$logId": {
+        ".write": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || ((!data.exists() && newData.child('ownerUid').val() === auth.uid && root.child('requestClaims').child(newData.child('requestId').val()).child('ownerUid').val() === auth.uid && root.child('requestClaims').child(newData.child('requestId').val()).child('type').val() === 'visit' && root.child('requestClaims').child(newData.child('requestId').val()).child('payloadHash').val() === newData.child('payloadHash').val()) || (data.exists() && newData.val() === data.val())))",
+        ".validate": "newData.hasChildren(['date','time','name','gender','age','purposes','requestId','payloadHash','ownerUid','createdAt']) && newData.child('createdAt').val() === root.child('requestClaims').child(newData.child('requestId').val()).child('createdAt').val()",
+        "date": { ".validate": "newData.isString() && newData.val().matches(/^(19|20)[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$/)" },
+        "time": { ".validate": "newData.isString() && newData.val().matches(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/)" },
+        "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 10" },
+        "gender": { ".validate": "newData.val() === '남' || newData.val() === '여'" },
+        "age": { ".validate": "newData.val() === '초등(9~13세)' || newData.val() === '중등(14~16세)' || newData.val() === '고등(17~19세)' || newData.val() === '청년(20~24세)' || newData.val() === '청년(25~39세)' || newData.val() === '유아(8세 미만)' || newData.val() === '성인(40세 이상)'" },
+        "purposes": {
+          ".validate": "newData.hasChildren()",
+          "$index": { ".validate": "$index.matches(/^[0-4]$/) && (newData.val() === '휴식' || newData.val() === '독서' || newData.val() === '보드게임' || newData.val() === '탁구' || newData.val() === '스터디룸')" }
+        },
+        "requestId": { ".validate": "newData.isString() && newData.val().matches(/^[a-zA-Z0-9_-]{20,80}$/)" },
+        "payloadHash": { ".validate": "newData.isString() && newData.val().matches(/^[a-zA-Z0-9_-]{8,80}$/)" },
+        "ownerUid": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "arLogs": {
+      ".indexOn": ["date", "requestId"],
+      ".read": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || (query.orderByChild === 'date' && query.limitToLast != null && query.limitToLast <= 5000 && (query.equalTo != null || (query.startAt != null && query.endAt != null))))",
+      "$logId": {
+        ".write": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || ((!data.exists() && $logId === newData.child('requestId').val() && newData.child('ownerUid').val() === auth.uid && root.child('requestClaims').child(newData.child('requestId').val()).child('ownerUid').val() === auth.uid && root.child('requestClaims').child(newData.child('requestId').val()).child('type').val() === 'ar' && root.child('arSlotLocks').child(newData.child('slotKey').val()).val() === newData.child('requestId').val()) || (data.exists() && newData.val() === data.val())))",
+        ".validate": "newData.hasChildren(['date','timeSlot','users','slotKey','requestId','payloadHash','ownerUid','createdAt']) && newData.child('createdAt').val() === root.child('requestClaims').child(newData.child('requestId').val()).child('createdAt').val()",
+        "date": { ".validate": "newData.isString() && newData.val().matches(/^(19|20)[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$/)" },
+        "timeSlot": { ".validate": "newData.isString() && newData.val().matches(/^([01]?[0-9]|2[0-3]):(00|30)$/)" },
+        "users": {
+          ".validate": "newData.hasChildren()",
+          "$index": {
+            ".validate": "$index.matches(/^([0-9]|1[0-9])$/) && newData.hasChildren(['name','gender','age'])",
+            "name": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 10" },
+            "gender": { ".validate": "newData.val() === '남' || newData.val() === '여'" },
+            "age": { ".validate": "newData.val() === '초등(9~13세)' || newData.val() === '중등(14~16세)' || newData.val() === '고등(17~19세)' || newData.val() === '청년(20~24세)' || newData.val() === '청년(25~39세)' || newData.val() === '유아(8세 미만)' || newData.val() === '성인(40세 이상)'" },
+            "$other": { ".validate": false }
+          }
+        },
+        "slotKey": { ".validate": "newData.isString() && newData.val() === newData.parent().child('date').val() + '_' + newData.parent().child('timeSlot').val()" },
+        "requestId": { ".validate": "newData.isString() && newData.val().matches(/^[a-zA-Z0-9_-]{20,80}$/)" },
+        "payloadHash": { ".validate": "newData.isString() && newData.val().matches(/^[a-zA-Z0-9_-]{8,80}$/)" },
+        "ownerUid": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "arSlotLocks": {
+      ".read": "auth != null && query.orderByKey && query.startAt != null && query.endAt != null && query.limitToLast != null && query.limitToLast <= 50",
+      "$slotKey": {
+        ".read": "auth != null",
+        ".write": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || ((!data.exists() && newData.isString() && root.child('requestClaims').child(newData.val()).child('ownerUid').val() === auth.uid && root.child('requestClaims').child(newData.val()).child('type').val() === 'ar') || (data.isString() && newData.val() === data.val()) || (data.isString() && !newData.exists() && root.child('requestClaims').child(data.val()).child('ownerUid').val() === auth.uid && !root.child('arLogs').child(data.val()).exists())))",
+        ".validate": "newData.isString() && newData.val().matches(/^[a-zA-Z0-9_-]{20,80}$/)"
+      }
+    },
+
+    "tvSettings": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.email === 'shneunggok@gmail.com'"
+    },
+    "tvContent": {
+      ".read": "auth != null",
+      ".write": "auth != null && auth.token.email === 'shneunggok@gmail.com'",
+      "events": {
+        ".indexOn": ["startDate", "endDate", "enabled"],
+        "$item": {
+          ".validate": "newData.hasChildren(['title','startDate','enabled'])",
+          "title": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 120" },
+          "description": { ".validate": "newData.isString() && newData.val().length <= 2000" },
+          "startDate": { ".validate": "newData.isString() && newData.val().matches(/^(19|20)[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$/)" },
+          "endDate": { ".validate": "newData.isString() && (newData.val() === '' || newData.val().matches(/^(19|20)[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$/))" },
+          "enabled": { ".validate": "newData.isBoolean()" }
+        }
+      },
+      "notices": {
+        ".indexOn": ["startDate", "endDate", "enabled"],
+        "$item": {
+          ".validate": "newData.hasChildren(['startDate','enabled'])",
+          "title": { ".validate": "newData.isString() && newData.val().length <= 120" },
+          "description": { ".validate": "newData.isString() && newData.val().length <= 4000" },
+          "startDate": { ".validate": "newData.isString() && newData.val().matches(/^(19|20)[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$/)" },
+          "endDate": { ".validate": "newData.isString() && (newData.val() === '' || newData.val().matches(/^(19|20)[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$/))" },
+          "enabled": { ".validate": "newData.isBoolean()" }
+        }
+      },
+      "attendanceEvents": {
+        ".indexOn": ["startDate", "endDate", "type", "enabled"],
+        "$item": {
+          ".validate": "newData.hasChildren(['type','title','startDate','criteriaCount','winnerCount','enabled'])",
+          "type": { ".validate": "newData.val() === 'visit' || newData.val() === 'ar'" },
+          "title": { ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 120" },
+          "startDate": { ".validate": "newData.isString() && newData.val().matches(/^(19|20)[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$/)" },
+          "endDate": { ".validate": "newData.isString() && (newData.val() === '' || newData.val().matches(/^(19|20)[0-9]{2}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])$/))" },
+          "criteriaCount": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 10000" },
+          "winnerCount": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000" },
+          "enabled": { ".validate": "newData.isBoolean()" }
+        }
+      }
+    },
+    "tvStatus": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      ".validate": "newData.hasChildren(['online','lastSync'])",
+      "online": { ".validate": "newData.isBoolean()" },
+      "lastSync": { ".validate": "newData.isNumber() && newData.val() <= now" },
+      "currentSlide": { ".validate": "newData.isString() && newData.val().length <= 80" },
+      "$other": { ".validate": false }
+    }
+  }
+}
+

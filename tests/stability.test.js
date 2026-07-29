@@ -55,6 +55,7 @@ test("shared utilities reject impossible dates and normalize Firebase collection
     assert.equal(context.isValidDateKey("not-a-date"), false);
     assert.deepEqual(Array.from(context.toArray({ a: 1, b: 2 })), [1, 2]);
     assert.deepEqual(Array.from(context.toArray("invalid")), []);
+    assert.equal(context.escapeCsvCell('쉼표,줄바꿈\n"따옴표"'), '"쉼표,줄바꿈\n""따옴표"""');
 });
 
 test("multi-person visit submission uses one atomic root update", async () => {
@@ -116,6 +117,93 @@ test("a completed requestId returns success without writing the logs again", asy
     assert.equal(updateCalls, 0);
 });
 
+test("request claim permission conflicts and network errors have distinct user messages", async () => {
+    const context = runScript("js/requests.js", {
+        window: {},
+        auth: { currentUser: { uid: "anon-1" } },
+        db: {
+            ref() {
+                return {
+                    transaction() {
+                        return Promise.reject(Object.assign(
+                            new Error("permission_denied"),
+                            { code: "PERMISSION_DENIED" }
+                        ));
+                    }
+                };
+            }
+        },
+        firebase: { database: { ServerValue: { TIMESTAMP: 123 } } }
+    });
+    const request = {
+        requestId: "0123456789abcdef0123456789abcdef",
+        payloadHash: "a".repeat(64),
+        type: "visit",
+        payload: { date: "2026-07-28" }
+    };
+
+    await assert.rejects(
+        context.claimIdempotentRequest(request),
+        (error) => error?.code === "REQUEST_ID_CONFLICT"
+    );
+    assert.equal(
+        context.requestSaveErrorMessage({ code: "REQUEST_ID_CONFLICT" }),
+        "이미 처리된 요청입니다. 새로고침 후 다시 시도해 주세요."
+    );
+    assert.equal(
+        context.requestSaveErrorMessage({ code: "NETWORK_ERROR" }),
+        "네트워크 연결이 불안정합니다. 연결을 확인한 후 다시 시도해 주세요."
+    );
+});
+
+test("request claims use the server-confirmed timestamp after a transaction", async () => {
+    const committedClaim = {
+        ownerUid: "anon-1",
+        type: "visit",
+        payloadHash: "a".repeat(64),
+        date: "2026-07-28",
+        status: "pending",
+        createdAt: 456
+    };
+    const context = runScript("js/requests.js", {
+        window: {},
+        auth: { currentUser: { uid: "anon-1" } },
+        db: {
+            ref() {
+                return {
+                    transaction() {
+                        return Promise.resolve({
+                            committed: true,
+                            snapshot: {
+                                val() {
+                                    return { ...committedClaim, createdAt: 123 };
+                                }
+                            }
+                        });
+                    },
+                    once() {
+                        return Promise.resolve({
+                            val() {
+                                return committedClaim;
+                            }
+                        });
+                    }
+                };
+            }
+        },
+        firebase: { database: { ServerValue: { TIMESTAMP: { ".sv": "timestamp" } } } }
+    });
+    const request = {
+        requestId: "0123456789abcdef0123456789abcdef",
+        payloadHash: committedClaim.payloadHash,
+        type: "visit",
+        payload: { date: committedClaim.date }
+    };
+
+    const result = await context.claimIdempotentRequest(request);
+    assert.equal(result.createdAt, 456);
+});
+
 test("failed AR writes wait for slot-lock cleanup before allowing a retry", async () => {
     let releaseCleanup;
     const cleanupFinished = new Promise((resolve) => { releaseCleanup = resolve; });
@@ -127,7 +215,7 @@ test("failed AR writes wait for slot-lock cleanup before allowing a retry", asyn
         createdAt: 123
     };
     const context = runScript("js/ar.js", {
-        auth: { currentUser: { uid: "anon-1" } },
+        auth: { currentUser: { uid: "anon-1", isAnonymous: true } },
         claimIdempotentRequest: async () => ({ createdAt: 123 }),
         isRequestComplete: async () => false,
         createSlotKey() { return "2026-07-24_10:00"; },
@@ -174,7 +262,7 @@ test("AR transaction rejects a simultaneous reservation for the same slot", asyn
         createdAt: 123
     };
     const context = runScript("js/ar.js", {
-        auth: { currentUser: { uid: "anon-1" } },
+        auth: { currentUser: { uid: "anon-1", isAnonymous: true } },
         claimIdempotentRequest: async () => ({ createdAt: 123 }),
         isRequestComplete: async () => false,
         createSlotKey() { return "2026-07-24_10:00"; },
@@ -193,6 +281,343 @@ test("AR transaction rejects a simultaneous reservation for the same slot", asyn
         context.reserveSlotAndSaveArLog("2026-07-24", "10:00", { users: [] }, request),
         (error) => error && error.code === "SLOT_TAKEN"
     );
+});
+
+test("failed AR save releases its own slot lock and the same request can retry", async () => {
+    const request = {
+        requestId: "0123456789abcdef0123456789abcdef",
+        payloadHash: "a".repeat(64),
+        type: "ar",
+        createdAt: 123
+    };
+    let lockValue = null;
+    let updateCalls = 0;
+    const lockRef = {
+        async transaction(callback) {
+            const nextValue = callback(lockValue);
+            if (nextValue === undefined) return { committed: false };
+            lockValue = nextValue;
+            return { committed: true };
+        }
+    };
+    const context = runScript("js/ar.js", {
+        auth: { currentUser: { uid: "anon-1", isAnonymous: true } },
+        claimIdempotentRequest: async () => ({ createdAt: 123, status: "pending" }),
+        isRequestComplete: async () => false,
+        createSlotKey() { return "2026-07-24_10:00"; },
+        logError() {},
+        arSlotLocksRef: { child() { return lockRef; } },
+        db: {
+            ref() {
+                return {
+                    async update() {
+                        updateCalls += 1;
+                        if (updateCalls === 1) {
+                            throw Object.assign(new Error("network failed"), { code: "NETWORK_ERROR" });
+                        }
+                    }
+                };
+            }
+        }
+    });
+
+    await assert.rejects(
+        context.reserveSlotAndSaveArLog(
+            "2026-07-24",
+            "10:00",
+            { date: "2026-07-24", timeSlot: "10:00", users: [] },
+            request
+        ),
+        /network failed/
+    );
+    assert.equal(lockValue, null);
+
+    await context.reserveSlotAndSaveArLog(
+        "2026-07-24",
+        "10:00",
+        { date: "2026-07-24", timeSlot: "10:00", users: [] },
+        request
+    );
+    assert.equal(lockValue, request.requestId);
+    assert.equal(updateCalls, 2);
+});
+
+test("AR save errors have distinct conflict, auth, network, and fallback messages", () => {
+    const context = runScript("js/ar.js", {
+        auth: { currentUser: { uid: "anon-1", isAnonymous: true } }
+    });
+    assert.equal(
+        context.arReservationSaveErrorMessage({ code: "SLOT_TAKEN" }),
+        "방금 다른 이용자가 같은 시간을 먼저 예약했습니다. 다른 시간을 선택해 주세요."
+    );
+    assert.equal(
+        context.arReservationSaveErrorMessage({ code: "AUTH_REQUIRED" }),
+        "사용자 인증에 실패했습니다. 새로고침 후 다시 시도해 주세요."
+    );
+    assert.equal(
+        context.arReservationSaveErrorMessage({ code: "NETWORK_ERROR" }),
+        "네트워크 연결을 확인한 후 다시 시도해 주세요."
+    );
+    assert.equal(
+        context.arReservationSaveErrorMessage({ code: "UNKNOWN" }),
+        "예약 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+    );
+    assert.equal(
+        context.arReservationSaveErrorMessage({ code: "permission_denied", arStage: "arSlotLocks" }),
+        "예약 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+    );
+});
+
+test("AR reservation restores missing anonymous auth before claiming a slot", async () => {
+    const request = {
+        requestId: "0123456789abcdef0123456789abcdef",
+        payloadHash: "a".repeat(64),
+        type: "ar",
+        createdAt: 123
+    };
+    let signInCalls = 0;
+    const auth = {
+        currentUser: null,
+        async signInAnonymously() {
+            signInCalls += 1;
+            this.currentUser = { uid: "anon-restored", isAnonymous: true };
+            return { user: this.currentUser };
+        }
+    };
+    const context = runScript("js/ar.js", {
+        auth,
+        claimIdempotentRequest: async () => ({ createdAt: 123, status: "pending" }),
+        createSlotKey() { return "2026-07-24_10:00"; },
+        arSlotLocksRef: {
+            child() {
+                return {
+                    async transaction(callback) {
+                        return { committed: callback(null) === request.requestId };
+                    }
+                };
+            }
+        },
+        db: { ref() { return { async update() {} }; } }
+    });
+
+    await context.reserveSlotAndSaveArLog(
+        "2026-07-24",
+        "10:00",
+        { date: "2026-07-24", timeSlot: "10:00", users: [] },
+        request
+    );
+
+    assert.equal(signInCalls, 1);
+    assert.equal(auth.currentUser.uid, "anon-restored");
+});
+
+function createArReservationListenerContext() {
+    const queries = [];
+    const messages = [];
+    const errors = [];
+    const context = runScript("js/ar.js", {
+        auth: { currentUser: { uid: "anonymous-user", isAnonymous: true } },
+        arSlotLocksRef: {
+            orderByKey() {
+                const query = {
+                    offCalls: 0,
+                    startAt() { return query; },
+                    endAt() { return query; },
+                    limitToLast() { return query; },
+                    on(_event, valueCallback, errorCallback) {
+                        query.valueCallback = valueCallback;
+                        query.errorCallback = errorCallback;
+                    },
+                    off() { query.offCalls += 1; }
+                };
+                queries.push(query);
+                return query;
+            }
+        },
+        formatLocalDate() { return "2026-07-28"; },
+        dom: { sectionAr: { classList: { contains() { return true; } } } },
+        generateTimeSlots() {},
+        cancelAdminLogLoads() {},
+        loadAdminLogPage() {},
+        showMessage(message) { messages.push(message); },
+        logError(scope, error) { errors.push({ scope, error }); }
+    });
+    return { context, queries, messages, errors };
+}
+
+test("today reservation listener stays single and admin cleanup does not reconnect it", () => {
+    const { context, queries } = createArReservationListenerContext();
+
+    assert.equal(context.subscribeArLogsToday(), true);
+    assert.equal(context.subscribeArLogsToday(), true);
+    assert.equal(queries.length, 2);
+    assert.equal(queries[0].offCalls, 1);
+    assert.equal(queries[1].offCalls, 0);
+
+    context.unsubscribeArLogsAll();
+    assert.equal(queries.length, 2);
+    assert.equal(queries[1].offCalls, 0);
+
+    context.unsubscribeArLogsToday();
+    assert.equal(queries[1].offCalls, 1);
+});
+
+test("reservation listener suppresses auth-transition cancellation and separates errors", () => {
+    const { context, queries, messages, errors } = createArReservationListenerContext();
+
+    context.subscribeArLogsToday();
+    context.setArAuthTransitioning(true);
+    queries[0].errorCallback({ code: "permission_denied" });
+    assert.equal(messages.length, 0);
+    assert.equal(errors.length, 1);
+
+    context.setArAuthTransitioning(false);
+    queries[0].errorCallback({ code: "permission_denied" });
+    assert.equal(
+        messages.at(-1),
+        "사용자 인증에 실패했습니다. 새로고침 후 다시 시도해 주세요."
+    );
+
+    context.subscribeArLogsToday();
+    queries[1].errorCallback({ code: "NETWORK_ERROR" });
+    assert.equal(
+        messages.at(-1),
+        "예약 현황을 불러오지 못했습니다. 네트워크 연결을 확인해 주세요."
+    );
+});
+
+function createAdminExitContext(options = {}) {
+    const order = [];
+    const messages = [];
+    const classList = {
+        add() {},
+        remove() {},
+        replace() {}
+    };
+    let idleCallback = null;
+    const auth = {
+        currentUser: { uid: "admin-user", isAnonymous: false, email: "shneunggok@gmail.com" },
+        async signOut() {
+            order.push("signOut");
+            if (options.signOutError) throw options.signOutError;
+            auth.currentUser = null;
+        },
+        async signInAnonymously() {
+            order.push("signInAnonymously");
+            if (options.anonymousError) throw options.anonymousError;
+            auth.currentUser = { uid: "anonymous-user", isAnonymous: true };
+            return { user: auth.currentUser };
+        }
+    };
+    const dom = {
+        mainContentContainer: { classList },
+        mainTabs: { classList },
+        sectionVisit: { classList },
+        sectionAr: { classList },
+        adminTabs: { classList },
+        sectionAdmin: { classList },
+        exitAdminBtn: { classList },
+        adminEntryBtn: { classList }
+    };
+    const context = runScript("js/admin.js", {
+        ADMIN_EMAIL: "shneunggok@gmail.com",
+        auth,
+        dom,
+        document: {
+            body: { className: "" },
+            addEventListener() {}
+        },
+        window: {
+            setTimeout(callback) {
+                idleCallback = callback;
+                return 1;
+            },
+            clearTimeout() {}
+        },
+        clearTimeout() {},
+        unsubscribeVisitLogs() { order.push("unsubscribeVisitLogs"); },
+        unsubscribeArLogsToday() { order.push("unsubscribeArLogsToday"); },
+        unsubscribeArLogsAll() { order.push("unsubscribeArLogsAll"); },
+        cancelAdminStatisticsLoads() { order.push("cancelAdminStatisticsLoads"); },
+        unloadTvManagement() { order.push("unloadTvManagement"); },
+        setArAuthTransitioning(value) { order.push(`transition:${value}`); },
+        subscribeArLogsToday() { order.push("subscribeArLogsToday"); return true; },
+        subscribeVisitLogs() { order.push("subscribeVisitLogs"); },
+        subscribeArLogsAll() { order.push("subscribeArLogsAll"); },
+        switchTab(type) { order.push(`switchTab:${type}`); },
+        updateAttendanceEventBannerVisibility() {},
+        updateAdminDashboard() {},
+        showMessage(message) { messages.push(message); },
+        logError() {}
+    });
+    return {
+        context,
+        auth,
+        order,
+        messages,
+        getIdleCallback() { return idleCallback; }
+    };
+}
+
+test("manual admin exit waits for anonymous auth, deduplicates, and permits immediate AR navigation", async () => {
+    const { context, order } = createAdminExitContext();
+    const firstExit = context.exitAdmin();
+    const duplicateExit = context.exitAdmin();
+    assert.deepEqual(await Promise.all([firstExit, duplicateExit]), [true, true]);
+    context.switchTab("ar");
+
+    assert.equal(order.filter((item) => item === "signOut").length, 1);
+    assert.equal(order.filter((item) => item === "signInAnonymously").length, 1);
+    assert.equal(order.filter((item) => item === "subscribeArLogsToday").length, 1);
+    assert.ok(order.indexOf("unsubscribeArLogsToday") < order.indexOf("signOut"));
+    assert.ok(order.indexOf("signOut") < order.indexOf("signInAnonymously"));
+    assert.ok(order.indexOf("signInAnonymously") < order.indexOf("subscribeArLogsToday"));
+    assert.ok(order.indexOf("subscribeArLogsToday") < order.indexOf("switchTab:visit"));
+    assert.ok(order.indexOf("subscribeArLogsToday") < order.indexOf("switchTab:ar"));
+});
+
+test("automatic admin exit uses the same transition and repeated exits keep one listener each", async () => {
+    const state = createAdminExitContext();
+    assert.equal(state.context.restoreAdminSession({
+        isAnonymous: false,
+        email: "shneunggok@gmail.com"
+    }), true);
+    await state.getIdleCallback()();
+    assert.ok(state.messages.includes("관리자 세션이 자동으로 종료되었습니다."));
+
+    state.auth.currentUser = {
+        uid: "admin-user",
+        isAnonymous: false,
+        email: "shneunggok@gmail.com"
+    };
+    assert.equal(state.context.restoreAdminSession(state.auth.currentUser), true);
+    await state.context.exitAdmin();
+
+    state.auth.currentUser = {
+        uid: "admin-user",
+        isAnonymous: false,
+        email: "shneunggok@gmail.com"
+    };
+    assert.equal(state.context.restoreAdminSession(state.auth.currentUser), true);
+    await state.context.exitAdmin();
+
+    assert.equal(state.order.filter((item) => item === "signOut").length, 3);
+    assert.equal(state.order.filter((item) => item === "signInAnonymously").length, 3);
+    assert.equal(state.order.filter((item) => item === "subscribeArLogsToday").length, 3);
+});
+
+test("anonymous auth recovery failure shows the dedicated message without subscribing", async () => {
+    const state = createAdminExitContext({
+        anonymousError: Object.assign(new Error("auth unavailable"), { code: "auth/network-request-failed" })
+    });
+
+    assert.equal(await state.context.exitAdmin(), false);
+    assert.equal(
+        state.messages.at(-1),
+        "사용자 인증에 실패했습니다. 새로고침 후 다시 시도해 주세요."
+    );
+    assert.equal(state.order.includes("subscribeArLogsToday"), false);
+    assert.equal(state.order.includes("switchTab:visit"), true);
 });
 
 test("standalone statistics skip malformed records instead of stopping the dashboard", () => {
@@ -275,6 +700,441 @@ test("TV attendance subscriptions are bounded to the selected event period", () 
     assert.equal(calls.filter(([name]) => name === "off").length, 1);
 });
 
+function createTvRecoveryTestContext() {
+    const refs = new Map();
+    const visitQueries = [];
+    const arQueries = [];
+    const timers = new Set();
+    let timerId = 0;
+    let attendanceActive = 0;
+    let attendanceSubscribeCalls = 0;
+    let attendanceMaxActive = 0;
+
+    function createListenerRef(name) {
+        const ref = {
+            name,
+            active: 0,
+            onCalls: 0,
+            offCalls: 0,
+            successCallback: null,
+            errorCallback: null,
+            on(_event, success, error) {
+                ref.active = 1;
+                ref.onCalls += 1;
+                ref.successCallback = success;
+                ref.errorCallback = error;
+            },
+            off() {
+                ref.active = 0;
+                ref.offCalls += 1;
+            },
+            set() { return Promise.resolve(); }
+        };
+        return ref;
+    }
+
+    function fixedRef(pathName) {
+        if (!refs.has(pathName)) refs.set(pathName, createListenerRef(pathName));
+        return refs.get(pathName);
+    }
+
+    const visitLogsRef = {
+        orderByChild() {
+            const query = createListenerRef("visit-query");
+            query.equalTo = () => query;
+            query.limitToLast = () => query;
+            visitQueries.push(query);
+            return query;
+        }
+    };
+    const arSlotLocksRef = {
+        orderByKey() {
+            const query = createListenerRef("ar-query");
+            query.startAt = () => query;
+            query.endAt = () => query;
+            query.limitToLast = () => query;
+            arQueries.push(query);
+            return query;
+        }
+    };
+    const auth = {
+        currentUser: { uid: "admin-user", isAnonymous: false },
+        signInCalls: 0,
+        signInAnonymously() {
+            auth.signInCalls += 1;
+            auth.currentUser = { uid: "anonymous-user", isAnonymous: true };
+            return Promise.resolve({ user: auth.currentUser });
+        }
+    };
+    const windowStub = {
+        setTimeout(callback, delay = 0) {
+            const handle = { id: ++timerId, callback, delay };
+            timers.add(handle);
+            return handle;
+        },
+        clearTimeout(handle) {
+            timers.delete(handle);
+        },
+        setInterval,
+        clearInterval,
+        addEventListener() {}
+    };
+    const documentStub = {
+        readyState: "loading",
+        visibilityState: "visible",
+        documentElement: { style: { setProperty() {} } },
+        body: { dataset: {} },
+        addEventListener() {},
+        getElementById() { return null; },
+        querySelector() { return null; },
+        querySelectorAll() { return []; }
+    };
+    const context = runScript("js/tv.js", {
+        window: windowStub,
+        document: documentStub,
+        location: { search: "" },
+        URLSearchParams,
+        auth,
+        db: { ref: fixedRef },
+        visitLogsRef,
+        arSlotLocksRef,
+        firebase: { database: { ServerValue: { TIMESTAMP: 123 } } },
+        formatLocalDate() { return "2026-07-29"; },
+        escapeHtml(value) { return String(value || ""); },
+        TVCommon: {
+            shouldWriteStatus() { return false; },
+            normalizeFixedSlides(value) { return value || []; },
+            backgroundPreset() { return null; },
+            themePreset() {
+                return {
+                    background: "#000000",
+                    accent: "#00ffff",
+                    secondary: "#ffffff"
+                };
+            },
+            isActive() { return true; },
+            sortEvents(value) { return value; },
+            sortNotices(value) { return value; }
+        },
+        subscribeAttendanceBoards() {
+            attendanceActive = 1;
+            attendanceSubscribeCalls += 1;
+            attendanceMaxActive = Math.max(attendanceMaxActive, attendanceActive);
+        },
+        unsubscribeAttendanceBoards() {
+            attendanceActive = 0;
+        },
+        getTvAttendanceSubscriptionCount() {
+            return attendanceActive ? 3 : 0;
+        }
+    });
+
+    return {
+        context,
+        auth,
+        refs,
+        visitQueries,
+        arQueries,
+        getAttendanceState() {
+            return {
+                active: attendanceActive,
+                subscribeCalls: attendanceSubscribeCalls,
+                maxActive: attendanceMaxActive
+            };
+        },
+        getTimers() {
+            return Array.from(timers).sort((first, second) => first.id - second.id);
+        },
+        runTimer(handle) {
+            if (!timers.has(handle)) return false;
+            timers.delete(handle);
+            handle.callback();
+            return true;
+        }
+    };
+}
+
+test("TV automatically restores one realtime subscription set after forced admin logout", () => {
+    const state = createTvRecoveryTestContext();
+    const { context, auth, refs, visitQueries, arQueries } = state;
+
+    context.handleTvAuthStateChanged(auth.currentUser);
+    assert.equal(refs.get("tvSettings").onCalls, 1);
+    assert.equal(refs.get("tvContent/events").onCalls, 1);
+    assert.equal(refs.get("tvContent/notices").onCalls, 1);
+    assert.equal(visitQueries.length, 1);
+    assert.equal(arQueries.length, 1);
+    const staleVisitError = visitQueries[0].errorCallback;
+
+    // The administrator's 30-minute exit briefly removes auth. Firebase
+    // cancels protected listeners before anonymous auth is restored.
+    refs.get("tvContent/events").successCallback({
+        val() {
+            return {
+                event: {
+                    title: "기존 이벤트",
+                    enabled: true,
+                    startDate: "2026-07-01"
+                }
+            };
+        }
+    });
+    let contentErrorRenders = 0;
+    context.renderContentError = () => { contentErrorRenders += 1; };
+    refs.get("tvContent/events").errorCallback({ code: "permission_denied" });
+
+    auth.currentUser = null;
+    context.handleTvAuthStateChanged(null);
+    auth.currentUser = { uid: "anonymous-user", isAnonymous: true };
+    context.handleTvAuthStateChanged(auth.currentUser);
+
+    assert.equal(contentErrorRenders, 0);
+    assert.equal(refs.get("tvSettings").onCalls, 2);
+    assert.equal(refs.get("tvContent/events").onCalls, 2);
+    assert.equal(refs.get("tvContent/notices").onCalls, 2);
+    assert.equal(visitQueries.length, 2);
+    assert.equal(arQueries.length, 2);
+    assert.equal(visitQueries[0].active, 0);
+    assert.equal(arQueries[0].active, 0);
+    assert.equal(visitQueries[1].active, 1);
+    assert.equal(arQueries[1].active, 1);
+    assert.deepEqual(state.getAttendanceState(), {
+        active: 1,
+        subscribeCalls: 2,
+        maxActive: 1
+    });
+
+    // A cancellation callback already queued by the previous auth generation
+    // must not tear down the newly restored listeners.
+    staleVisitError({ code: "permission_denied" });
+    assert.equal(visitQueries[1].active, 1);
+    assert.equal(refs.get("tvSettings").active, 1);
+
+    // Repeated auth notifications for the same anonymous user must not add
+    // another copy of any listener.
+    context.handleTvAuthStateChanged(auth.currentUser);
+    assert.equal(refs.get("tvSettings").onCalls, 2);
+    assert.equal(refs.get("tvContent/events").onCalls, 2);
+    assert.equal(state.getAttendanceState().subscribeCalls, 2);
+
+    context.applyTvContentAvailability("events", false);
+    context.applyTvContentAvailability("notices", false);
+    assert.equal(vm.runInContext("TV_CONFIG.enabledSlides.events", context), false);
+    assert.equal(vm.runInContext("TV_CONFIG.enabledSlides.notices", context), false);
+    context.applyTvContentAvailability("events", true);
+    assert.equal(vm.runInContext("TV_CONFIG.enabledSlides.events", context), true);
+});
+
+test("TV attendance keeps cached ranking data while permission recovery is scheduled", () => {
+    let errorCallback = null;
+    const recoveries = [];
+    const query = {
+        orderByChild() { return query; },
+        startAt() { return query; },
+        endAt() { return query; },
+        limitToLast() { return query; },
+        on(_event, _success, failure) { errorCallback = failure; },
+        off() {}
+    };
+    const context = runScript("js/tv-attendance.js", {
+        window: { setInterval, clearInterval },
+        location: { search: "" },
+        URLSearchParams,
+        document: createDocumentStub(),
+        formatLocalDate() { return "2026-07-29"; },
+        isValidDateKey(value) { return /^\d{4}-\d{2}-\d{2}$/.test(value || ""); },
+        escapeHtml(value) { return String(value || ""); },
+        handleTvRealtimeSubscriptionError(source, error) {
+            recoveries.push({ source, code: error.code });
+        }
+    });
+
+    context.tvAttendanceState.events = {
+        active: {
+            type: "visit",
+            enabled: true,
+            startDate: "2026-07-01",
+            endDate: "2026-08-30"
+        }
+    };
+    context.tvAttendanceState.visitLogs = {
+        cached: { date: "2026-07-29", name: "기존 순위" }
+    };
+    context.subscribeAttendanceLogSource("visit", query);
+    errorCallback({ code: "permission_denied" });
+
+    assert.equal(context.tvAttendanceState.visitError, false);
+    assert.equal(context.tvAttendanceState.visitLogs.cached.name, "기존 순위");
+    assert.deepEqual(recoveries, [{
+        source: "attendance-visitLogs",
+        code: "permission_denied"
+    }]);
+});
+
+test("TV retry backoff is jittered, capped at five minutes, and stops after ten attempts", () => {
+    const state = createTvRecoveryTestContext();
+    const { context, auth, visitQueries } = state;
+
+    assert.equal(context.tvRetryDelayForAttempt(0, 0), 400);
+    assert.equal(context.tvRetryDelayForAttempt(0, 1), 500);
+    assert.equal(context.tvRetryDelayForAttempt(4, 0), 24000);
+    assert.equal(context.tvRetryDelayForAttempt(5, 1), 60000);
+    assert.equal(context.tvRetryDelayForAttempt(9, 0), 240000);
+    assert.equal(context.tvRetryDelayForAttempt(9, 1), 300000);
+    assert.equal(context.classifyTvFailure({ code: "permission_denied" }), "permission");
+    assert.equal(context.classifyTvFailure({ code: "auth/invalid-user-token" }), "auth");
+    assert.equal(context.classifyTvFailure({ code: "auth/network-request-failed" }), "network");
+    assert.equal(context.classifyTvFailure({ code: "NETWORK_ERROR" }), "network");
+
+    context.handleTvAuthStateChanged(auth.currentUser);
+    const observedRetryDelays = [];
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+        visitQueries.at(-1).errorCallback({ code: "permission_denied" });
+        const retryTimer = state.getTimers().find((timer) => timer.delay < 60000 || attempt >= 5);
+        assert.ok(retryTimer, `retry timer ${attempt + 1} should exist`);
+        observedRetryDelays.push(retryTimer.delay);
+        assert.equal(state.runTimer(retryTimer), true);
+    }
+
+    visitQueries.at(-1).errorCallback({ code: "permission_denied" });
+    const diagnostics = context.getTvRuntimeDiagnostics();
+    assert.equal(diagnostics.retryBlocked, true);
+    assert.equal(diagnostics.retryAttempts, 10);
+    assert.equal(diagnostics.metrics.retrySchedules, 10);
+    assert.equal(diagnostics.metrics.subscriptionSets, 11);
+    assert.equal(diagnostics.activeDatabaseSubscriptions, 0);
+    assert.equal(state.getTimers().length, 0);
+    assert.ok(observedRetryDelays[4] >= 24000 && observedRetryDelays[4] <= 30000);
+    assert.ok(observedRetryDelays[5] >= 48000 && observedRetryDelays[5] <= 60000);
+    assert.ok(observedRetryDelays[8] >= 240000 && observedRetryDelays[8] <= 300000);
+    assert.ok(observedRetryDelays[9] >= 240000 && observedRetryDelays[9] <= 300000);
+});
+
+test("TV retry ceiling cannot be bypassed by alternating failure categories for the same user", () => {
+    const state = createTvRecoveryTestContext();
+    const { context, auth, visitQueries } = state;
+
+    context.handleTvAuthStateChanged(auth.currentUser);
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+        const code = attempt % 2 === 0 ? "permission_denied" : "NETWORK_ERROR";
+        visitQueries.at(-1).errorCallback({ code });
+        const retryTimer = state.getTimers()[0];
+        assert.ok(retryTimer, `retry timer ${attempt + 1} should exist`);
+        assert.equal(state.runTimer(retryTimer), true);
+    }
+
+    visitQueries.at(-1).errorCallback({ code: "auth/invalid-user-token" });
+    const diagnostics = context.getTvRuntimeDiagnostics();
+    assert.equal(diagnostics.retryBlocked, true);
+    assert.equal(diagnostics.retryAttempts, 10);
+    assert.equal(diagnostics.metrics.retrySchedules, 10);
+    assert.equal(state.getTimers().length, 0);
+});
+
+test("TV only reports connected after every required data source succeeds", () => {
+    const state = createTvRecoveryTestContext();
+    const { context, auth, refs, visitQueries, arQueries } = state;
+
+    const statusText = { textContent: "" };
+    const statusDot = { className: "", classList: { add() {} } };
+    context.document.getElementById = (id) => {
+        if (id === "tv-status-text") return statusText;
+        if (id === "tv-connection-status") return statusDot;
+        return null;
+    };
+    context.cacheTVDOM();
+    context.handleTvAuthStateChanged(auth.currentUser);
+    assert.equal(context.getTvRuntimeDiagnostics().healthySources, 0);
+
+    refs.get("tvSettings").successCallback({ val() { return null; } });
+    visitQueries[0].successCallback({ numChildren() { return 0; } });
+    arQueries[0].successCallback({ numChildren() { return 0; } });
+    refs.get("tvContent/events").successCallback({ val() { return null; } });
+    refs.get("tvContent/notices").successCallback({ val() { return null; } });
+
+    const beforeAttendance = context.getTvRuntimeDiagnostics();
+    assert.equal(beforeAttendance.healthySources, 5);
+    assert.equal(beforeAttendance.requiredSources, 6);
+    assert.notEqual(statusText.textContent, "Firebase 연결됨");
+
+    context.markTvRealtimeHealthy(
+        "attendanceEvents",
+        context.getTvRuntimeDiagnostics().subscriptionGeneration
+    );
+    assert.equal(statusText.textContent, "Firebase 연결됨");
+});
+
+test("12-hour TV soak keeps subscriptions, timers, and heap bounded across admin exits", () => {
+    const state = createTvRecoveryTestContext();
+    const { context, auth, refs, visitQueries, arQueries } = state;
+    const coreSources = [
+        "tvSettings",
+        "visitLogs",
+        "arSlotLocks",
+        "attendanceEvents",
+        "events",
+        "notices"
+    ];
+    const markCoreHealthy = () => {
+        const generation = context.getTvRuntimeDiagnostics().subscriptionGeneration;
+        coreSources.forEach((source) => context.markTvRealtimeHealthy(source, generation));
+    };
+
+    if (global.gc) global.gc();
+    const heapBefore = process.memoryUsage().heapUsed;
+
+    vm.runInContext(
+        "clockTimer = { kind: 'clock' }; slideTimer = { kind: 'slide' }; " +
+        "statusTimer = { kind: 'status' }; eventImageTimer = { kind: 'event-image' };",
+        context
+    );
+    context.handleTvAuthStateChanged(auth.currentUser);
+    markCoreHealthy();
+    for (let halfHour = 1; halfHour <= 24; halfHour += 1) {
+        auth.currentUser = {
+            uid: `admin-${halfHour}`,
+            isAnonymous: false,
+            getIdToken() { return Promise.resolve("token"); }
+        };
+        context.handleTvAuthStateChanged(auth.currentUser);
+        markCoreHealthy();
+
+        refs.get("tvContent/events").errorCallback({ code: "permission_denied" });
+        auth.currentUser = null;
+        context.handleTvAuthStateChanged(null);
+        auth.currentUser = { uid: `anonymous-${halfHour}`, isAnonymous: true };
+        context.handleTvAuthStateChanged(auth.currentUser);
+        markCoreHealthy();
+
+        visitQueries.length = 0;
+        arQueries.length = 0;
+        const diagnostics = context.getTvRuntimeDiagnostics();
+        assert.equal(diagnostics.activeDatabaseSubscriptions, 8);
+        assert.equal(diagnostics.activeTimers, 4);
+        assert.equal(diagnostics.retryBlocked, false);
+    }
+
+    if (global.gc) global.gc();
+    const heapAfter = process.memoryUsage().heapUsed;
+    const diagnostics = context.getTvRuntimeDiagnostics();
+    console.info("[tv-soak-12h]", JSON.stringify({
+        heapBefore,
+        heapAfter,
+        heapDelta: heapAfter - heapBefore,
+        activeDatabaseSubscriptions: diagnostics.activeDatabaseSubscriptions,
+        activeTimers: diagnostics.activeTimers,
+        subscriptionSets: diagnostics.metrics.subscriptionSets,
+        authAttempts: diagnostics.metrics.authAttempts,
+        retrySchedules: diagnostics.metrics.retrySchedules
+    }));
+
+    assert.equal(diagnostics.activeDatabaseSubscriptions, 8);
+    assert.equal(diagnostics.activeTimers, 4);
+    assert.equal(diagnostics.metrics.authAttempts, 0);
+    assert.equal(diagnostics.metrics.subscriptionSets, 49);
+    assert.ok(heapAfter - heapBefore < 1024 * 1024);
+});
+
 test("pending requests reuse the same requestId across retries and separate dates", async () => {
     let stored = "";
     const context = runScript("js/requests.js", {
@@ -316,19 +1176,80 @@ test("pending requests reuse the same requestId across retries and separate date
 });
 
 function createFirebasePageRef(records, options = {}) {
+    const compareKeys = (firstKeyValue, secondKeyValue) => {
+        const firstKey = String(firstKeyValue);
+        const secondKey = String(secondKeyValue);
+        if (firstKey === secondKey) return 0;
+        const asInteger = (key) => /^-?(0*)\d{1,10}$/.test(key) &&
+            Number(key) >= -2147483648 && Number(key) <= 2147483647
+            ? Number(key)
+            : null;
+        const firstInteger = asInteger(firstKey);
+        const secondInteger = asInteger(secondKey);
+        if (firstInteger !== null) {
+            if (secondInteger !== null) {
+                return firstInteger === secondInteger
+                    ? firstKey.length - secondKey.length
+                    : firstInteger - secondInteger;
+            }
+            return -1;
+        }
+        if (secondInteger !== null) return 1;
+        return firstKey < secondKey ? -1 : 1;
+    };
     return {
-        orderByChild() {
-            const state = { start: null, end: null, endKey: null, limit: null };
+        orderByChild(field) {
+            const state = {
+                field,
+                start: null,
+                startSet: false,
+                startKey: null,
+                end: null,
+                endSet: false,
+                endKey: null,
+                equal: null,
+                equalSet: false,
+                limit: null
+            };
             const query = {
-                startAt(value) { state.start = value; return query; },
-                endAt(value, key) { state.end = value; state.endKey = key || null; return query; },
+                startAt(value, key) {
+                    state.start = value;
+                    state.startSet = true;
+                    state.startKey = key ?? null;
+                    return query;
+                },
+                endAt(value, key) {
+                    state.end = value;
+                    state.endSet = true;
+                    state.endKey = key ?? null;
+                    return query;
+                },
+                equalTo(value) {
+                    state.equal = value;
+                    state.equalSet = true;
+                    return query;
+                },
                 limitToLast(value) { state.limit = value; return query; },
                 once() {
                     if (options.onRead) options.onRead({ ...state });
-                    let result = records.filter((record) => {
-                        if (state.start && record.date < state.start) return false;
-                        if (state.end && (record.date > state.end ||
-                            (record.date === state.end && state.endKey && record._key > state.endKey))) return false;
+                    const valueOf = (record) => record[state.field] ?? null;
+                    let result = records.slice().sort((first, second) => {
+                        const firstValue = valueOf(first);
+                        const secondValue = valueOf(second);
+                        if (firstValue === null && secondValue !== null) return -1;
+                        if (firstValue !== null && secondValue === null) return 1;
+                        if (firstValue < secondValue) return -1;
+                        if (firstValue > secondValue) return 1;
+                        return compareKeys(first._key, second._key);
+                    }).filter((record) => {
+                        const value = valueOf(record);
+                        if (state.equalSet && value !== state.equal) return false;
+                        if (state.startSet && (value < state.start ||
+                            (value === state.start && state.startKey &&
+                                compareKeys(record._key, state.startKey) < 0))) return false;
+                        if (state.endSet && (value > state.end ||
+                            (value === state.end && state.endKey &&
+                                compareKeys(record._key, state.endKey) > 0))) return false;
                         return true;
                     });
                     if (state.limit) result = result.slice(-state.limit);
@@ -350,60 +1271,457 @@ function createFirebasePageRef(records, options = {}) {
     };
 }
 
-test("admin pagination keeps thousands of records out of memory and has no page overlap", async () => {
+function parseCsvRows(content) {
+    const rows = [];
+    let row = [];
+    let cell = "";
+    let quoted = false;
+    const source = String(content).replace(/^\uFEFF/, "");
+    for (let index = 0; index < source.length; index += 1) {
+        const character = source[index];
+        if (quoted) {
+            if (character === '"' && source[index + 1] === '"') {
+                cell += '"';
+                index += 1;
+            } else if (character === '"') {
+                quoted = false;
+            } else {
+                cell += character;
+            }
+        } else if (character === '"') {
+            quoted = true;
+        } else if (character === ",") {
+            row.push(cell);
+            cell = "";
+        } else if (character === "\r" && source[index + 1] === "\n") {
+            row.push(cell);
+            rows.push(row);
+            row = [];
+            cell = "";
+            index += 1;
+        } else {
+            cell += character;
+        }
+    }
+    if (cell || row.length) {
+        row.push(cell);
+        rows.push(row);
+    }
+    return rows;
+}
+
+function createAdminExportTestContext(options = {}) {
     const elements = new Map();
-    const getElement = (id) => {
-        if (!elements.has(id)) elements.set(id, { textContent: "", disabled: false });
+    const messages = [];
+    const downloads = [];
+    const createdUrls = new Map();
+    let urlSequence = 0;
+    const controls = {
+        "start-date": { value: options.start || "2026-07-01" },
+        "end-date": { value: options.end || "2026-07-31" },
+        "filter-year-select": { value: "2026" },
+        "filter-month-select": { value: "6" }
+    };
+    const createElement = (id = "") => {
+        const label = { textContent: "" };
+        return {
+            id,
+            value: "",
+            textContent: "",
+            innerText: "",
+            innerHTML: "",
+            disabled: false,
+            dataset: {},
+            style: {},
+            classList: {
+                add() {},
+                remove() {},
+                toggle() {},
+                contains() { return false; },
+                replace() {}
+            },
+            setAttribute(name, value) { this[name] = value; },
+            appendChild() {},
+            querySelector(selector) {
+                return selector === "[data-export-label]" ? label : null;
+            },
+            querySelectorAll() { return []; },
+            addEventListener() {},
+            click() {}
+        };
+    };
+    const getElementById = (id) => {
+        if (controls[id]) return controls[id];
+        if (!elements.has(id)) elements.set(id, createElement(id));
         return elements.get(id);
     };
-    const records = Array.from({ length: 5000 }, (_, index) => ({
-        _key: `log-${String(index).padStart(5, "0")}`,
-        date: `2026-07-${String(1 + (index % 24)).padStart(2, "0")}`,
-        value: index
-    })).sort((a, b) => a.date.localeCompare(b.date) || a._key.localeCompare(b._key));
-    let dashboardUpdates = 0;
+    const document = {
+        getElementById,
+        querySelectorAll() { return []; },
+        createElement(tag) {
+            if (tag !== "a") return createElement(tag);
+            const attributes = {};
+            return {
+                setAttribute(name, value) { attributes[name] = value; },
+                click() {
+                    downloads.push({
+                        fileName: attributes.download,
+                        content: createdUrls.get(attributes.href)?.content || ""
+                    });
+                }
+            };
+        }
+    };
+    class CsvBlob {
+        constructor(parts, metadata) {
+            this.content = parts.join("");
+            this.type = metadata?.type || "";
+        }
+    }
+    const context = vm.createContext({
+        console,
+        setTimeout,
+        clearTimeout,
+        document,
+        window: { setTimeout(callback) { callback(); } },
+        URL: {
+            createObjectURL(blob) {
+                const url = `blob:test-${++urlSequence}`;
+                createdUrls.set(url, blob);
+                return url;
+            },
+            revokeObjectURL(url) {
+                createdUrls.delete(url);
+            }
+        },
+        Blob: CsvBlob,
+        visitLogsRef: options.visitRef || createFirebasePageRef(options.visits || [], {
+            onRead: options.onVisitRead
+        }),
+        arLogsRef: options.arRef || createFirebasePageRef(options.ars || [], {
+            onRead: options.onArRead
+        }),
+        visitLogs: options.currentVisits || [],
+        arLogs: options.currentArs || [],
+        currentFilter: options.filter || "custom",
+        isAdminUser: true,
+        AGE_GROUPS: ["성인(40세 이상)"],
+        PURPOSES: ["독서"],
+        updateAdminDashboard() {},
+        lucide: null
+    });
+    for (const relativePath of ["js/utils.js", "js/admin-data.js"]) {
+        const source = fs.readFileSync(path.join(projectRoot, relativePath), "utf8");
+        vm.runInContext(source, context, { filename: relativePath });
+    }
+    context.showMessage = (message, type) => messages.push({ message, type });
+    context.logError = () => {};
+    return { context, elements, messages, downloads, controls };
+}
+
+function csvVisitRecord(index, overrides = {}) {
+    return {
+        _key: `visit-export-${String(index).padStart(5, "0")}`,
+        date: "2026-07-15",
+        time: `${String(index % 24).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}`,
+        name: `방문자-${String(index).padStart(5, "0")}`,
+        gender: index % 2 ? "여" : "남",
+        age: "성인(40세 이상)",
+        purposes: ["독서"],
+        createdAt: new Date(2026, 6, 15).getTime() + index,
+        ...overrides
+    };
+}
+
+function csvArRecord(index, overrides = {}) {
+    return {
+        _key: `ar-export-${String(index).padStart(5, "0")}`,
+        date: "2026-07-15",
+        timeSlot: `${String(10 + (index % 10)).padStart(2, "0")}:${index % 2 ? "30" : "00"}`,
+        users: [{
+            name: `예약자-${String(index).padStart(5, "0")}`,
+            gender: index % 2 ? "여" : "남",
+            age: "성인(40세 이상)"
+        }],
+        createdAt: new Date(2026, 6, 15).getTime() + index,
+        ...overrides
+    };
+}
+
+test("period CSV exports 0, 1, 100, 101, and 1001 records without omissions or duplicates", async (t) => {
+    for (const type of ["visit", "ar"]) {
+        for (const count of [0, 1, 100, 101, 1001]) {
+            await t.test(`${type} ${count} records`, async () => {
+                const records = Array.from({ length: count }, (_, index) =>
+                    type === "visit" ? csvVisitRecord(index) : csvArRecord(index)
+                );
+                const options = type === "visit" ? { visits: records } : { ars: records };
+                const { context, downloads, messages } = createAdminExportTestContext(options);
+
+                const result = await context.exportAdminPeriodCsv(type);
+                assert.equal(result, count > 0);
+                assert.equal(downloads.length, count > 0 ? 1 : 0);
+                if (count === 0) {
+                    assert.match(messages.at(-1).message, /다운로드할 데이터가 없습니다/);
+                    return;
+                }
+
+                const rows = parseCsvRows(downloads[0].content);
+                assert.equal(downloads[0].content.startsWith("\uFEFF"), true);
+                assert.equal(rows.length, count + 1);
+                const identityColumn = type === "visit" ? 2 : 2;
+                const identities = rows.slice(1).map((row) => row[identityColumn]);
+                assert.equal(new Set(identities).size, count);
+            });
+        }
+    }
+});
+
+test("period CSV uses 400-record cursor pages, progress UI, and keeps the current detail page unchanged", async () => {
+    let testState;
+    const progressStates = [];
+    const visits = Array.from({ length: 1001 }, (_, index) => csvVisitRecord(index));
+    testState = createAdminExportTestContext({
+        visits,
+        currentVisits: [csvVisitRecord(9999, { _key: "current-page-record" })],
+        onVisitRead() {
+            if (!testState) return;
+            const button = testState.elements.get("visit-period-csv-btn");
+            const label = button?.querySelector("[data-export-label]");
+            progressStates.push({
+                disabled: button?.disabled,
+                label: label?.textContent || ""
+            });
+        }
+    });
+    const originalPage = testState.context.visitLogs;
+
+    assert.equal(await testState.context.exportAdminPeriodCsv("visit"), true);
+    assert.equal(testState.downloads.length, 1);
+    assert.equal(testState.context.visitLogs, originalPage);
+    assert.equal(testState.context.visitLogs[0]._key, "current-page-record");
+    assert.equal(progressStates.length, 3);
+    assert.deepEqual(progressStates.map((state) => state.disabled), [true, true, true]);
+    assert.match(progressStates[0].label, /^0건 불러오는 중$/);
+    assert.match(progressStates[1].label, /^400건 불러오는 중$/);
+    assert.match(progressStates[2].label, /^800건 불러오는 중$/);
+    const button = testState.elements.get("visit-period-csv-btn");
+    assert.equal(button.disabled, false);
+    assert.equal(button.querySelector("[data-export-label]").textContent, "선택 기간 전체 CSV");
+});
+
+test("period CSV follows the selected boundaries, sorts newest first, and safely quotes special text", async () => {
+    const specialName = '홍,길동\n"별명"';
+    const visits = [
+        csvVisitRecord(1, { _key: "before", date: "2026-07-14", time: "23:59" }),
+        csvVisitRecord(2, { _key: "morning", date: "2026-07-15", time: "9:05", name: specialName }),
+        csvVisitRecord(3, { _key: "late", date: "2026-07-15", time: "18:30", name: "저녁" }),
+        csvVisitRecord(4, { _key: "after", date: "2026-07-16", time: "00:00" })
+    ];
+    const { context, downloads } = createAdminExportTestContext({
+        visits,
+        start: "2026-07-15",
+        end: "2026-07-15"
+    });
+
+    assert.equal(await context.exportAdminPeriodCsv("visit"), true);
+    const rows = parseCsvRows(downloads[0].content);
+    assert.equal(downloads[0].fileName, "방문등록_2026-07-15_2026-07-15.csv");
+    assert.deepEqual(rows.slice(1).map((row) => row[2]), ["저녁", specialName]);
+    assert.match(downloads[0].content, /"홍,길동\n""별명"""/);
+});
+
+test("a failed period CSV page never saves a partial file and can be retried", async () => {
+    const visits = Array.from({ length: 1001 }, (_, index) => csvVisitRecord(index));
+    let reads = 0;
+    let failSecondPage = true;
+    const ref = createFirebasePageRef(visits, {
+        onRead() {
+            reads += 1;
+            if (failSecondPage && reads === 2) throw new Error("network failure");
+        }
+    });
+    const testState = createAdminExportTestContext({ visitRef: ref });
+
+    assert.equal(await testState.context.exportAdminPeriodCsv("visit"), false);
+    assert.equal(testState.downloads.length, 0);
+    assert.match(testState.messages.at(-1).message, /불러오지 못했습니다/);
+    assert.equal(testState.elements.get("visit-period-csv-btn").disabled, false);
+
+    failSecondPage = false;
+    reads = 0;
+    assert.equal(await testState.context.exportAdminPeriodCsv("visit"), true);
+    assert.equal(testState.downloads.length, 1);
+    assert.equal(parseCsvRows(testState.downloads[0].content).length, 1002);
+});
+
+function createAdminDetailTestContext(records, options = {}) {
+    const elements = new Map();
+    const reads = [];
+    const dom = {
+        startDate: { value: options.start || "2026-07-01" },
+        endDate: { value: options.end || "2026-07-31" },
+        filterYearSelect: { value: "2026" },
+        filterMonthSelect: { value: "6" }
+    };
     const context = runScript("js/admin-data.js", {
-        visitLogsRef: createFirebasePageRef(records),
+        visitLogsRef: createFirebasePageRef(records, {
+            onRead(state) { reads.push(state); }
+        }),
         arLogsRef: createFirebasePageRef([]),
         visitLogs: [],
         arLogs: [],
-        currentFilter: "all",
-        dom: {},
-        document: { getElementById: getElement },
+        currentFilter: options.filter || "all",
+        dom,
+        document: {
+            getElementById(id) {
+                if (!elements.has(id)) {
+                    elements.set(id, { textContent: "", disabled: false });
+                }
+                return elements.get(id);
+            }
+        },
         isAdminUser: true,
-        updateAdminDashboard() { dashboardUpdates += 1; },
+        updateAdminDashboard() {},
         showMessage() {},
         logError() {},
-        formatLocalDate() { return "2026-07-31"; },
-        isValidDateKey() { return true; }
+        formatLocalDate(date = new Date()) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, "0");
+            const day = String(date.getDate()).padStart(2, "0");
+            return `${year}-${month}-${day}`;
+        },
+        isValidDateKey(value) {
+            return /^\d{4}-\d{2}-\d{2}$/.test(value || "");
+        }
     });
+    return { context, elements, reads, dom };
+}
+
+test("admin visit pagination uses createdAt and key without overlap", async () => {
+    const baseTimestamp = new Date(2026, 6, 1).getTime();
+    const records = Array.from({ length: 1001 }, (_, index) => ({
+        _key: `log-${String(index).padStart(5, "0")}`,
+        date: `2026-07-${String(1 + (index % 24)).padStart(2, "0")}`,
+        time: `${String(index % 24).padStart(2, "0")}:05`,
+        createdAt: baseTimestamp + Math.floor(index / 3) * 1000,
+        value: index
+    }));
+    const { context, elements } = createAdminDetailTestContext(records);
 
     await context.loadAdminLogPage("visit", { reset: true });
     const firstPageKeys = Array.from(context.visitLogs, (record) => record._key);
     assert.equal(firstPageKeys.length, 100);
+    assert.deepEqual(
+        Array.from(context.visitLogs.slice(0, 3), (record) => record._key),
+        ["log-01000", "log-00999", "log-00998"]
+    );
+    const allKeys = [...firstPageKeys];
+    for (let page = 1; page <= 10; page += 1) {
+        await context.moveAdminLogPage("visit", "next");
+        allKeys.push(...Array.from(context.visitLogs, (record) => record._key));
+    }
+    assert.equal(context.visitLogs.length, 1);
+    assert.equal(new Set(allKeys).size, 1001);
+    assert.deepEqual(allKeys, records.slice().sort((first, second) =>
+        second.createdAt - first.createdAt || second._key.localeCompare(first._key)
+    ).map((record) => record._key));
+    assert.match(elements.get("visit-page-status").textContent, /^11페이지 · 현재 1건$/);
+});
+
+test("admin visit detail uses numeric timestamps, local date boundaries, and legacy fallback", async () => {
+    const start = new Date(2026, 6, 15, 0, 0, 0, 0).getTime();
+    const end = new Date(2026, 6, 15, 23, 59, 59, 999).getTime();
+    const records = [
+        { _key: "before", date: "2026-07-14", time: "23:59", createdAt: start - 1 },
+        { _key: "at-start", date: "2026-07-15", time: "00:00", createdAt: start },
+        { _key: "nine", date: "2026-07-15", time: "9:05", createdAt: new Date(2026, 6, 15, 9, 5).getTime() },
+        { _key: "ten-a", date: "2026-07-15", time: "10:05", createdAt: new Date(2026, 6, 15, 10, 5).getTime() },
+        { _key: "ten-b", date: "2026-07-15", time: "10:05", createdAt: new Date(2026, 6, 15, 10, 5).getTime() },
+        { _key: "evening", date: "2026-07-15", time: "18:30", createdAt: new Date(2026, 6, 15, 18, 30).getTime() },
+        { _key: "legacy", date: "2026-07-15", time: "12:00" },
+        { _key: "at-end", date: "2026-07-15", time: "23:59", createdAt: end },
+        { _key: "after", date: "2026-07-16", time: "00:00", createdAt: end + 1 }
+    ];
+    const { context, reads } = createAdminDetailTestContext(records, {
+        filter: "custom",
+        start: "2026-07-15",
+        end: "2026-07-15"
+    });
+
+    await context.loadAdminLogPage("visit", { reset: true });
+    assert.deepEqual(Array.from(context.visitLogs, (record) => record._key), [
+        "at-end",
+        "evening",
+        "legacy",
+        "ten-b",
+        "ten-a",
+        "nine",
+        "at-start"
+    ]);
+    const createdAtRead = reads.find((read) =>
+        read.field === "createdAt" && !read.equalSet
+    );
+    assert.equal(createdAtRead.start, start);
+    assert.equal(createdAtRead.end, end);
+    assert.ok(reads.some((read) =>
+        read.field === "createdAt" && read.equalSet && read.equal === null
+    ));
+    assert.equal(context.visitLogs.find((record) => record._key === "legacy")._legacyCreatedAt, true);
+});
+
+test("admin visit first page refresh includes a newly added latest record", async () => {
+    const records = Array.from({ length: 101 }, (_, index) => ({
+        _key: `initial-${String(index).padStart(3, "0")}`,
+        date: "2026-07-15",
+        time: "10:00",
+        createdAt: 1_000 + index
+    }));
+    const { context } = createAdminDetailTestContext(records);
+    await context.loadAdminLogPage("visit", { reset: true });
+    assert.equal(context.visitLogs.length, 100);
     await context.moveAdminLogPage("visit", "next");
-    const secondPageKeys = Array.from(context.visitLogs, (record) => record._key);
-    assert.equal(secondPageKeys.length, 100);
-    assert.equal(firstPageKeys.some((key) => secondPageKeys.includes(key)), false);
-    assert.equal(dashboardUpdates, 2);
-    assert.match(getElement("visit-page-status").textContent, /^2페이지 · 현재 100건$/);
+    assert.equal(context.visitLogs.length, 1);
+
+    records.push({
+        _key: "new-latest",
+        date: "2026-07-15",
+        time: "18:30",
+        createdAt: 10_000
+    });
+    await context.loadAdminLogPage("visit", { reset: true });
+    assert.equal(context.visitLogs[0]._key, "new-latest");
 });
 
 test("an older admin response cannot overwrite a newer search result", async () => {
     const pending = [];
     const snapshot = (key) => ({
         forEach(callback) {
-            callback({ key, val: () => ({ date: "2026-07-24", name: key }) });
+            callback({
+                key,
+                val: () => ({
+                    date: "2026-07-24",
+                    createdAt: new Date(2026, 6, 24, 10).getTime(),
+                    name: key
+                })
+            });
         }
     });
+    const emptySnapshot = { forEach() {} };
     const refWithDeferredReads = {
         orderByChild() {
-            return {
+            let legacyOnly = false;
+            const query = {
+                startAt() { return query; },
+                endAt() { return query; },
+                equalTo(value) { legacyOnly = value === null; return query; },
                 limitToLast() { return this; },
                 once() {
+                    if (legacyOnly) return Promise.resolve(emptySnapshot);
                     return new Promise((resolve, reject) => pending.push({ resolve, reject }));
                 }
             };
+            return query;
         }
     };
     const elements = new Map();
@@ -515,6 +1833,7 @@ function visitStatsRecord(index, overrides = {}) {
     return {
         _key: `visit-${String(index).padStart(5, "0")}`,
         date: "2026-07-15",
+        createdAt: new Date(2026, 6, 15).getTime() + index,
         age: "성인(40세 이상)",
         gender: index % 2 ? "여" : "남",
         purposes: ["독서"],
@@ -534,6 +1853,12 @@ function arStatsRecord(index, userCount = 1, overrides = {}) {
         ...overrides
     };
 }
+
+test("visit detail rendering keeps the createdAt query order without reversing it", () => {
+    const source = fs.readFileSync(path.join(projectRoot, "js/nchm.js"), "utf8");
+    assert.match(source, /filteredVisitLogs\.forEach\(\(log\) =>/);
+    assert.doesNotMatch(source, /filteredVisitLogs\.slice\(\)\.reverse\(\)/);
+});
 
 test("whole-period aggregation handles 0, 1, 100, and 101 records", async (t) => {
     for (const count of [0, 1, 100, 101]) {

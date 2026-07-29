@@ -33,6 +33,7 @@ const tvAdminContentCache = { notices: {}, events: {}, attendance: {} };
 let tvNoticeSelectedFile = null;
 let tvNoticePreviewUrl = "";
 let tvNoticeUploading = false;
+let tvAdminEditorModal = null;
 
 function tvMerge(base, value) {
     const result = Array.isArray(base) ? base.slice() : { ...base };
@@ -145,6 +146,9 @@ function renderTvManagement() {
         ({ dark: "midnight-mint", blue: "graphite-sky", light: "warm-ivory" }[s.theme] || "midnight-mint");
     const p = tvPanel();
     if (!p) return;
+    // A settings refresh replaces the whole management panel. Close an open
+    // editor first so its promise and page scroll lock cannot be orphaned.
+    tvCloseEditorModal(null);
     p.innerHTML = `
       <div class="tv-admin-shell">
         <header class="tv-admin-header">
@@ -620,9 +624,32 @@ function tvRenderAttendanceEvents(items) {
         }
     }));
 }
+function tvCloseEditorModal(value) {
+    const modal = tvAdminEditorModal;
+    if (!modal) return false;
+    tvAdminEditorModal = null;
+    document.removeEventListener("keydown", modal.onKeydown);
+    modal.root.onclick = null;
+    if (modal.root.isConnected) {
+        modal.root.hidden = true;
+        modal.root.innerHTML = "";
+    }
+    if (modal.previousParent?.isConnected && modal.root.parentNode !== modal.previousParent) {
+        if (modal.previousNextSibling?.parentNode === modal.previousParent) {
+            modal.previousParent.insertBefore(modal.root, modal.previousNextSibling);
+        } else {
+            modal.previousParent.appendChild(modal.root);
+        }
+    }
+    document.body.style.overflow = modal.previousBodyOverflow;
+    if (modal.returnFocus?.isConnected) modal.returnFocus.focus();
+    modal.resolve(value ?? null);
+    return true;
+}
 function tvOpenEditorModal(options) {
     const root = document.getElementById("tv-content-modal");
     if (!root) return Promise.resolve(null);
+    tvCloseEditorModal(null);
     root.innerHTML = `<div class="tv-admin-dialog" role="dialog" aria-modal="true" aria-labelledby="tv-editor-title">
       <header class="tv-admin-dialog-header"><h3 id="tv-editor-title">${tvEscape(options.title)}</h3><button type="button" data-tv-modal-close class="tv-admin-icon-button" aria-label="편집 취소">×</button></header>
       <form id="tv-editor-form" novalidate>
@@ -630,23 +657,39 @@ function tvOpenEditorModal(options) {
         <footer class="tv-admin-dialog-footer"><button type="button" data-tv-modal-close class="tv-admin-button">취소</button><button type="submit" class="tv-admin-button tv-admin-button--primary">${tvEscape(options.submitLabel)}</button></footer>
       </form>
     </div>`;
+    const previousParent = root.parentNode;
+    const previousNextSibling = root.nextSibling;
+    // #section-admin keeps the completed fade-in transform. A fixed element
+    // inside that transformed section is positioned against the long admin
+    // panel instead of the viewport, which can place the dialog above the
+    // visible screen. Portal the editor to body while it is open.
+    if (root.parentNode !== document.body) {
+        document.body.appendChild(root);
+    }
     root.hidden = false;
+    const previousBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const form = root.querySelector("#tv-editor-form");
     const error = root.querySelector("#tv-editor-error");
-    const close = (value) => {
-        root.hidden = true;
-        root.innerHTML = "";
-        document.body.style.overflow = "";
-        return value;
-    };
     return new Promise((resolve) => {
-        root.querySelectorAll("[data-tv-modal-close]").forEach((button) => button.addEventListener("click", () => resolve(close(null))));
-        root.onclick = (event) => {
-            if (event.target === root) resolve(close(null));
+        const onKeydown = (event) => {
+            if (event.key !== "Escape" || tvAdminEditorModal?.root !== root) return;
+            event.preventDefault();
+            tvCloseEditorModal(null);
         };
-        root.onkeydown = (event) => {
-            if (event.key === "Escape") resolve(close(null));
+        tvAdminEditorModal = {
+            root,
+            resolve,
+            onKeydown,
+            previousBodyOverflow,
+            previousParent,
+            previousNextSibling,
+            returnFocus: document.activeElement
+        };
+        document.addEventListener("keydown", onKeydown);
+        root.querySelectorAll("[data-tv-modal-close]").forEach((button) => button.addEventListener("click", () => tvCloseEditorModal(null)));
+        root.onclick = (event) => {
+            if (event.target === root) tvCloseEditorModal(null);
         };
         form.addEventListener("input", () => {
             const start = form.elements.startDate?.value;
@@ -663,7 +706,7 @@ function tvOpenEditorModal(options) {
                 form.elements.endDate.focus();
                 return;
             }
-            resolve(close(Object.fromEntries(new FormData(form).entries())));
+            tvCloseEditorModal(Object.fromEntries(new FormData(form).entries()));
         });
         form.querySelector("input,select,textarea")?.focus();
     });
@@ -1111,6 +1154,7 @@ function loadTvSettings() {
     });
 }
 function unloadTvManagement() {
+    tvCloseEditorModal(null);
     clearTimeout(tvAdminSaveTimer);
     tvAdminSaveTimer = null;
     if (tvAdminSettingsListener) {

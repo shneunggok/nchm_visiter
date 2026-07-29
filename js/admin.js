@@ -5,6 +5,8 @@ let adminIdleTimer = null;
 let adminActivityWatchersInitialized = false;
 let adminLoginUnlockTimer = null;
 let isAdminLoginPending = false;
+let adminExitPromise = null;
+let adminAuthTransitionInProgress = false;
 
 const ADMIN_LOGIN_MAX_ATTEMPTS = 5;
 const ADMIN_LOGIN_LOCK_MS = 60 * 1000;
@@ -121,14 +123,25 @@ function enterAdminMode() {
     updateAdminDashboard();
 }
 
-function exitAdmin() {
+function isAdminAuthTransitioning() {
+    return adminAuthTransitionInProgress;
+}
+
+function finishAdminExitUi() {
     dom.mainContentContainer.classList.replace("max-w-6xl", "max-w-xl");
     dom.adminTabs.classList.add("hidden");
     dom.sectionAdmin.classList.add("hidden");
     dom.exitAdminBtn.classList.add("hidden");
     dom.adminEntryBtn.classList.remove("hidden");
+    switchTab("visit");
+}
+
+async function runAdminExit() {
+    adminAuthTransitionInProgress = true;
+    setArAuthTransitioning(true);
 
     unsubscribeVisitLogs();
+    unsubscribeArLogsToday();
     unsubscribeArLogsAll();
     if (typeof cancelAdminStatisticsLoads === "function") {
         cancelAdminStatisticsLoads();
@@ -142,18 +155,46 @@ function exitAdmin() {
         unloadTvManagement();
     }
 
-    auth.signOut().catch((e) => logError("exitAdmin", e));
+    try {
+        await auth.signOut();
+        const credential = await auth.signInAnonymously();
+        const anonymousUser = credential?.user || auth.currentUser;
+        if (!anonymousUser || !anonymousUser.isAnonymous) {
+            throw new Error("ANONYMOUS_AUTH_RECOVERY_FAILED");
+        }
 
-    switchTab("visit");
+        setArAuthTransitioning(false);
+        subscribeArLogsToday();
+        finishAdminExitUi();
+        return true;
+    } catch (error) {
+        logError("exitAdmin-auth-recovery", error);
+        showMessage("사용자 인증에 실패했습니다. 새로고침 후 다시 시도해 주세요.");
+        finishAdminExitUi();
+        return false;
+    } finally {
+        setArAuthTransitioning(false);
+        adminAuthTransitionInProgress = false;
+    }
+}
+
+async function exitAdmin() {
+    if (adminExitPromise) return adminExitPromise;
+    adminExitPromise = runAdminExit();
+    try {
+        return await adminExitPromise;
+    } finally {
+        adminExitPromise = null;
+    }
 }
 
 function resetAdminIdleTimeout() {
     if (!isAdminUser) return;
     window.clearTimeout(adminIdleTimer);
-    adminIdleTimer = window.setTimeout(() => {
+    adminIdleTimer = window.setTimeout(async () => {
         if (!isAdminUser) return;
         showMessage("관리자 세션이 자동으로 종료되었습니다.", "info");
-        exitAdmin();
+        await exitAdmin();
     }, ADMIN_IDLE_LOGOUT_MS);
 }
 

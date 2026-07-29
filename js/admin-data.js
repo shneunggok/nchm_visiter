@@ -1,6 +1,7 @@
 const ADMIN_LOG_PAGE_SIZE = 100;
 const ADMIN_LOG_QUERY_OVERFETCH = 2;
 const ADMIN_STATS_PAGE_SIZE = 400;
+const ADMIN_EXPORT_PAGE_SIZE = 400;
 const ADMIN_STATS_CACHE_VERSION = 1;
 const ADMIN_STATS_CACHE_TTL_MS = 5 * 60 * 1000;
 const ADMIN_STATS_CACHE_STORAGE_KEY = "nchm.admin.period-stats.v1";
@@ -40,6 +41,10 @@ const adminPeriodStats = {
 const adminStatsProgress = {
     visit: { status: "idle", processed: 0, fromCache: false, error: null },
     ar: { status: "idle", processed: 0, fromCache: false, error: null }
+};
+const adminExportStates = {
+    visit: { loading: false, requestVersion: 0, processed: 0 },
+    ar: { loading: false, requestVersion: 0, processed: 0 }
 };
 
 function createAdminStatsMatrix(categories) {
@@ -130,6 +135,243 @@ function getAdminDateRange() {
         return { start, end, filter: "custom" };
     }
     return { start: "", end: "", filter: "all" };
+}
+
+function adminExportButtonId(type) {
+    return `${type}-period-csv-btn`;
+}
+
+function updateAdminExportButton(type) {
+    if (typeof document === "undefined") return;
+    const state = adminExportStates[type];
+    const button = document.getElementById(adminExportButtonId(type));
+    if (!state || !button) return;
+    const label = button.querySelector?.("[data-export-label]");
+    button.disabled = state.loading;
+    button.setAttribute?.("aria-busy", state.loading ? "true" : "false");
+    const text = state.loading
+        ? `${formatAdminStatNumber(state.processed)}건 불러오는 중`
+        : "선택 기간 전체 CSV";
+    if (label) {
+        label.textContent = text;
+    } else {
+        button.textContent = text;
+    }
+}
+
+function setAdminExportLoading(type, loading, processed = 0) {
+    const state = adminExportStates[type];
+    if (!state) return;
+    state.loading = loading;
+    state.processed = processed;
+    updateAdminExportButton(type);
+}
+
+function isAdminExportRequestActive(type, requestVersion) {
+    const state = adminExportStates[type];
+    return Boolean(state)
+        && state.requestVersion === requestVersion
+        && (typeof isAdminUser === "undefined" || isAdminUser);
+}
+
+function cancelAdminExportLoads(type) {
+    const types = type ? [type] : Object.keys(adminExportStates);
+    types.forEach((name) => {
+        const state = adminExportStates[name];
+        if (!state) return;
+        state.requestVersion += 1;
+        setAdminExportLoading(name, false, 0);
+    });
+}
+
+function getAdminExportTimeMinutes(type, record) {
+    const rawTime = type === "visit" ? record?.time : record?.timeSlot;
+    const match = typeof rawTime === "string"
+        ? rawTime.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/)
+        : null;
+    return match ? Number(match[1]) * 60 + Number(match[2]) : -1;
+}
+
+function compareAdminExportRecords(type, first, second) {
+    const firstDate = isValidDateKey(first?.date) ? first.date : "";
+    const secondDate = isValidDateKey(second?.date) ? second.date : "";
+    if (firstDate !== secondDate) return secondDate.localeCompare(firstDate);
+
+    const timeDifference = getAdminExportTimeMinutes(type, second)
+        - getAdminExportTimeMinutes(type, first);
+    if (timeDifference) return timeDifference;
+
+    const firstCreatedAt = Number.isFinite(first?.createdAt) ? first.createdAt : 0;
+    const secondCreatedAt = Number.isFinite(second?.createdAt) ? second.createdAt : 0;
+    if (firstCreatedAt !== secondCreatedAt) return secondCreatedAt - firstCreatedAt;
+    return -compareAdminFirebaseKeys(first?._key || "", second?._key || "");
+}
+
+async function loadAdminExportRecords(type, range, requestVersion, onProgress) {
+    const ref = type === "visit" ? visitLogsRef : arLogsRef;
+    const records = [];
+    const seenKeys = new Set();
+    let anchor = null;
+
+    while (isAdminExportRequestActive(type, requestVersion)) {
+        let query = ref.orderByChild("date");
+        if (range.start) query = query.startAt(range.start);
+        if (anchor) {
+            query = query.endAt(anchor.date, anchor.key);
+        } else if (range.end) {
+            query = query.endAt(range.end);
+        }
+        query = query.limitToLast(ADMIN_EXPORT_PAGE_SIZE + 1);
+
+        const snapshot = await query.once("value");
+        if (!isAdminExportRequestActive(type, requestVersion)) return null;
+
+        let page = [];
+        snapshot.forEach((child) => {
+            const value = child.val();
+            page.push({
+                key: child.key,
+                date: value && typeof value === "object" ? value.date ?? null : null,
+                value
+            });
+        });
+        const hasMore = page.length > ADMIN_EXPORT_PAGE_SIZE;
+        if (anchor) {
+            page = page.filter((entry) =>
+                !(entry.key === anchor.key && entry.date === anchor.date)
+            );
+        }
+        if (page.length > ADMIN_EXPORT_PAGE_SIZE) {
+            page = page.slice(page.length - ADMIN_EXPORT_PAGE_SIZE);
+        }
+
+        page.forEach((entry) => {
+            if (!entry.value || typeof entry.value !== "object" || seenKeys.has(entry.key)) return;
+            seenKeys.add(entry.key);
+            records.push({ _key: entry.key, ...entry.value });
+        });
+        if (typeof onProgress === "function") onProgress(records.length);
+
+        if (!hasMore || page.length === 0) break;
+        const oldest = page[0];
+        const nextAnchor = { date: oldest.date, key: oldest.key };
+        if (anchor && anchor.date === nextAnchor.date && anchor.key === nextAnchor.key) {
+            const error = new Error("ADMIN_EXPORT_CURSOR_STALLED");
+            error.code = "ADMIN_EXPORT_CURSOR_STALLED";
+            throw error;
+        }
+        anchor = nextAnchor;
+    }
+
+    if (!isAdminExportRequestActive(type, requestVersion)) return null;
+    records.sort((first, second) => compareAdminExportRecords(type, first, second));
+    return records;
+}
+
+function createAdminPeriodCsv(type, records) {
+    const rows = [];
+    if (type === "visit") {
+        rows.push(["날짜", "시간", "이름", "성별", "나이", "이용목적"]);
+        records.forEach((record) => {
+            rows.push([
+                record.date,
+                record.time,
+                record.name,
+                record.gender,
+                (record.age || "").split("(")[0],
+                toArray(record.purposes).join(", ")
+            ]);
+        });
+    } else {
+        rows.push(["예약날짜", "예약시간", "대표자", "총인원", "이용자상세"]);
+        records.forEach((record) => {
+            const users = toArray(record.users).filter((user) =>
+                user && typeof user === "object"
+            );
+            const details = users.map((user) =>
+                `${user.name || ""}(${user.gender || ""}/${(user.age || "").split("(")[0]})`
+            ).join(" | ");
+            rows.push([
+                record.date,
+                record.timeSlot,
+                users[0]?.name || "",
+                users.length,
+                details
+            ]);
+        });
+    }
+    return "\uFEFF" + rows
+        .map((row) => row.map((value) => escapeCsvCell(value)).join(","))
+        .join("\r\n") + "\r\n";
+}
+
+function adminExportFileName(type, range) {
+    const label = range.start && range.end
+        ? `${range.start}_${range.end}`
+        : "전체";
+    return `${type === "visit" ? "방문등록" : "AR예약"}_${label}.csv`;
+}
+
+function saveAdminCsvFile(content, fileName) {
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", fileName);
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function exportAdminPeriodCsv(type) {
+    const state = adminExportStates[type];
+    if (!state || state.loading) return false;
+    if (typeof isAdminUser !== "undefined" && !isAdminUser) {
+        showMessage("관리자 로그인 후 다운로드해 주세요.");
+        return false;
+    }
+
+    let range;
+    try {
+        range = getAdminDateRange();
+    } catch (error) {
+        showMessage("조회 시작일과 종료일을 올바르게 입력해 주세요.");
+        return false;
+    }
+
+    const requestVersion = ++state.requestVersion;
+    setAdminExportLoading(type, true, 0);
+    try {
+        const records = await loadAdminExportRecords(
+            type,
+            range,
+            requestVersion,
+            (processed) => {
+                if (!isAdminExportRequestActive(type, requestVersion)) return;
+                state.processed = processed;
+                updateAdminExportButton(type);
+            }
+        );
+        if (!records || !isAdminExportRequestActive(type, requestVersion)) return false;
+        if (records.length === 0) {
+            showMessage("선택한 기간에 다운로드할 데이터가 없습니다.", "info");
+            return false;
+        }
+        saveAdminCsvFile(
+            createAdminPeriodCsv(type, records),
+            adminExportFileName(type, range)
+        );
+        showMessage(`${formatAdminStatNumber(records.length)}건 CSV 다운로드를 완료했습니다.`, "success");
+        return true;
+    } catch (error) {
+        if (!isAdminExportRequestActive(type, requestVersion)) return false;
+        logError(`admin-${type}-csv-export`, error);
+        showMessage("전체 기간 데이터를 불러오지 못했습니다. 네트워크 연결 후 다시 시도해 주세요.");
+        return false;
+    } finally {
+        if (state.requestVersion === requestVersion) {
+            setAdminExportLoading(type, false, 0);
+        }
+    }
 }
 
 function parseAdminLocalDateTimestamp(dateKey, endOfDay = false) {

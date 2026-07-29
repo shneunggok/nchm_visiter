@@ -146,6 +146,9 @@ async function runAdminExit() {
     if (typeof cancelAdminStatisticsLoads === "function") {
         cancelAdminStatisticsLoads();
     }
+    if (typeof cancelAdminExportLoads === "function") {
+        cancelAdminExportLoads();
+    }
     isAdminUser = false;
     if (adminIdleTimer) {
         clearTimeout(adminIdleTimer);

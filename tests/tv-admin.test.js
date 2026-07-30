@@ -94,6 +94,20 @@ test("recommended TV backgrounds are complete, unique, and safely selectable", (
     assert.equal(common.backgroundPreset("midnight-mint").background, "#0B1220");
 });
 
+test("TV slide duration offers short and long choices while preserving a custom value", () => {
+    const harness = createEditorModalHarness();
+    const standard = harness.modalContext.tvSlideDurationOptions(45);
+    const custom = harness.modalContext.tvSlideDurationOptions(7);
+
+    [3, 5, 8, 10, 12, 15, 20, 25, 30, 45, 60, 90, 120].forEach((seconds) => {
+        assert.match(standard, new RegExp(`value="${seconds}"`));
+    });
+    assert.match(standard, /value="45" selected/);
+    assert.match(custom, /value="7" selected/);
+    assert.ok(custom.indexOf('value="5"') < custom.indexOf('value="7"'));
+    assert.ok(custom.indexOf('value="7"') < custom.indexOf('value="8"'));
+});
+
 function createEditorModalHarness() {
     const handlers = new Map();
     const makeTarget = () => ({

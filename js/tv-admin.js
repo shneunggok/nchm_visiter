@@ -18,6 +18,7 @@ const TV_DEFAULTS = {
     ]
 };
 const TV_LABELS = { welcome: "환영 화면", visitors: "오늘의 방문자", attendanceVisit: "방문 이벤트 순위", attendanceAr: "AR 이벤트 순위", ar: "AR 현황", events: "이벤트", notices: "공지사항" };
+const TV_SLIDE_DURATION_OPTIONS = [3, 5, 8, 10, 12, 15, 20, 25, 30, 45, 60, 90, 120];
 let tvAdminSettings = null;
 let tvAdminDirty = false;
 let tvAdminSaveTimer = null;
@@ -48,6 +49,17 @@ function tvNormalizeSlides(settings) {
     return settings.slides;
 }
 function tvEscape(value) { return escapeHtml(value == null ? "" : value); }
+function tvSlideDurationOptions(selectedDuration) {
+    const selected = Number(selectedDuration);
+    const options = TV_SLIDE_DURATION_OPTIONS.slice();
+    if (Number.isFinite(selected) && selected >= 3 && !options.includes(selected)) {
+        options.push(selected);
+        options.sort((first, second) => first - second);
+    }
+    return options.map((seconds) =>
+        `<option value="${seconds}" ${selected === seconds ? "selected" : ""}>${seconds}초</option>`
+    ).join("");
+}
 function tvPanel() { return document.getElementById("admin-tv-settings"); }
 function tvButton(label, action, classes) { return `<button type="button" data-tv-action="${action}" class="${classes}">${label}</button>`; }
 function tvField(label, input, help) { return `<label class="block space-y-1.5"><span class="block text-sm font-bold text-slate-700">${label}</span>${input}${help ? `<span class="block text-xs leading-5 text-slate-500">${help}</span>` : ""}</label>`; }
@@ -179,7 +191,7 @@ function renderTvManagement() {
 
             <section id="tv-tab-slides" class="tv-admin-tab" hidden>
               <div class="tv-admin-section-header"><div><h3>재생 순서</h3><p>고정 7개 화면의 순서, 표시 여부와 유지 시간을 관리합니다.</p></div></div>
-              <div id="tv-slide-list" class="tv-admin-playlist">${fixedSlides.map((slide, index) => `<div draggable="true" data-tv-slide="${slide.id}" class="tv-admin-slide"><span class="tv-admin-drag" aria-hidden="true">⋮⋮</span><b class="tv-admin-slide-title">${index + 1}. ${tvEscape(TV_LABELS[slide.id])}</b><label class="tv-admin-slide-controls"><input type="checkbox" ${slide.enabled ? "checked" : ""}> 표시</label><label class="tv-admin-slide-controls"><select aria-label="${tvEscape(TV_LABELS[slide.id])} 유지 시간">${[5,8,10,15,20,30].map((n) => `<option value="${n}" ${Number(slide.duration) === n ? "selected" : ""}>${n}초</option>`).join("")}</select></label><span><button type="button" data-tv-move="up" class="tv-admin-icon-button" aria-label="${tvEscape(TV_LABELS[slide.id])} 위로 이동">↑</button><button type="button" data-tv-move="down" class="tv-admin-icon-button" aria-label="${tvEscape(TV_LABELS[slide.id])} 아래로 이동">↓</button></span></div>`).join("")}</div>
+              <div id="tv-slide-list" class="tv-admin-playlist">${fixedSlides.map((slide, index) => `<div draggable="true" data-tv-slide="${slide.id}" class="tv-admin-slide"><span class="tv-admin-drag" aria-hidden="true">⋮⋮</span><b class="tv-admin-slide-title">${index + 1}. ${tvEscape(TV_LABELS[slide.id])}</b><label class="tv-admin-slide-controls"><input type="checkbox" ${slide.enabled ? "checked" : ""}> 표시</label><label class="tv-admin-slide-controls"><select aria-label="${tvEscape(TV_LABELS[slide.id])} 유지 시간">${tvSlideDurationOptions(slide.duration)}</select></label><span><button type="button" data-tv-move="up" class="tv-admin-icon-button" aria-label="${tvEscape(TV_LABELS[slide.id])} 위로 이동">↑</button><button type="button" data-tv-move="down" class="tv-admin-icon-button" aria-label="${tvEscape(TV_LABELS[slide.id])} 아래로 이동">↓</button></span></div>`).join("")}</div>
             </section>
 
             <section id="tv-tab-content" class="tv-admin-tab" hidden>

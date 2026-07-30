@@ -854,6 +854,171 @@ function createTvRecoveryTestContext() {
     };
 }
 
+test("TV event rotation preserves image and text-only events in one sequence", () => {
+    const { context } = createTvRecoveryTestContext();
+    const items = context.buildEventRotationItems([
+        ["image-event", {
+            title: "이미지 행사",
+            images: [
+                { secure_url: "https://example.com/first.jpg" },
+                "https://example.com/second.jpg"
+            ]
+        }],
+        ["text-event", {
+            title: "텍스트 행사",
+            description: "이미지 없이 표시되는 행사",
+            startDate: "2026-07-01",
+            endDate: "2026-07-31"
+        }],
+        ["legacy-image-event", {
+            title: "기존 이미지 행사",
+            image: "https://example.com/legacy.jpg"
+        }]
+    ]);
+
+    assert.deepEqual(
+        Array.from(items, (item) => ({
+            kind: item.kind,
+            eventId: item.eventId,
+            title: item.title,
+            url: item.url || ""
+        })),
+        [
+            {
+                kind: "image",
+                eventId: "image-event",
+                title: "이미지 행사",
+                url: "https://example.com/first.jpg"
+            },
+            {
+                kind: "image",
+                eventId: "image-event",
+                title: "이미지 행사",
+                url: "https://example.com/second.jpg"
+            },
+            {
+                kind: "text",
+                eventId: "text-event",
+                title: "텍스트 행사",
+                url: ""
+            },
+            {
+                kind: "image",
+                eventId: "legacy-image-event",
+                title: "기존 이미지 행사",
+                url: "https://example.com/legacy.jpg"
+            }
+        ]
+    );
+});
+
+test("TV event rotation activates exactly one item and wraps without duplication", () => {
+    const { context } = createTvRecoveryTestContext();
+    const frames = Array.from({ length: 3 }, () => {
+        const classes = new Set();
+        return {
+            classes,
+            classList: {
+                toggle(name, enabled) {
+                    if (enabled) classes.add(name);
+                    else classes.delete(name);
+                }
+            }
+        };
+    });
+    const container = {
+        querySelectorAll(selector) {
+            assert.equal(selector, ".tv-event-rotation-frame");
+            return frames;
+        }
+    };
+
+    context.showEventRotationItem(container, 0);
+    assert.deepEqual(frames.map((frame) => frame.classes.has("is-active")), [true, false, false]);
+    context.showEventRotationItem(container, 1);
+    assert.deepEqual(frames.map((frame) => frame.classes.has("is-active")), [false, true, false]);
+    context.showEventRotationItem(container, 3);
+    assert.deepEqual(frames.map((frame) => frame.classes.has("is-active")), [true, false, false]);
+});
+
+test("TV event rendering includes every mixed event while showing one frame at a time", () => {
+    const { context } = createTvRecoveryTestContext();
+    const containerClasses = new Set();
+    const slideClasses = new Set();
+    const slideContent = {
+        classList: {
+            add(name) { slideClasses.add(name); },
+            remove(name) { slideClasses.delete(name); }
+        }
+    };
+    const renderedFrames = [];
+    const container = {
+        dataset: {},
+        innerHTML: "",
+        classList: {
+            add(name) { containerClasses.add(name); },
+            remove(name) { containerClasses.delete(name); }
+        },
+        closest(selector) {
+            assert.equal(selector, ".tv-slide-content");
+            return slideContent;
+        },
+        querySelectorAll(selector) {
+            if (selector === ".tv-event-rotation-frame--image img") return [];
+            if (selector !== ".tv-event-rotation-frame") return [];
+            const count = (container.innerHTML.match(/class="tv-event-rotation-frame /g) || []).length;
+            while (renderedFrames.length < count) {
+                const classes = new Set();
+                renderedFrames.push({
+                    classList: {
+                        toggle(name, enabled) {
+                            if (enabled) classes.add(name);
+                            else classes.delete(name);
+                        }
+                    }
+                });
+            }
+            return renderedFrames.slice(0, count);
+        }
+    };
+    let intervalCount = 0;
+    context.window.setInterval = () => {
+        intervalCount += 1;
+        return { kind: "event-rotation" };
+    };
+    context.window.clearInterval = () => {};
+    context.__eventsContainer = container;
+    vm.runInContext("TV_DOM.eventsContainer = __eventsContainer", context);
+
+    context.renderEvents({
+        imageEvent: {
+            title: "포스터 행사",
+            enabled: true,
+            images: [{ secure_url: "https://example.com/poster.jpg" }]
+        },
+        firstTextEvent: {
+            title: "텍스트 행사 1",
+            description: "첫 번째 안내",
+            enabled: true
+        },
+        secondTextEvent: {
+            title: "텍스트 행사 2",
+            description: "두 번째 안내",
+            enabled: true
+        }
+    });
+
+    assert.equal((container.innerHTML.match(/class="tv-event-rotation-frame /g) || []).length, 3);
+    assert.equal((container.innerHTML.match(/tv-event-rotation-frame--image/g) || []).length, 1);
+    assert.equal((container.innerHTML.match(/tv-event-rotation-frame--text/g) || []).length, 2);
+    assert.match(container.innerHTML, /poster\.jpg/);
+    assert.match(container.innerHTML, /텍스트 행사 1/);
+    assert.match(container.innerHTML, /텍스트 행사 2/);
+    assert.equal(intervalCount, 1);
+    assert.equal(containerClasses.has("tv-events-container--fullscreen"), true);
+    assert.equal(slideClasses.has("tv-slide-content--fullscreen-event"), true);
+});
+
 test("TV automatically restores one realtime subscription set after forced admin logout", () => {
     const state = createTvRecoveryTestContext();
     const { context, auth, refs, visitQueries, arQueries } = state;

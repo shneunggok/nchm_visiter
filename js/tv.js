@@ -731,8 +731,8 @@ function stopEventImageRotation() {
     }
 }
 
-function showEventFullscreenImage(container, index) {
-    var frames = container.querySelectorAll(".tv-event-fullscreen-frame");
+function showEventRotationItem(container, index) {
+    var frames = container.querySelectorAll(".tv-event-rotation-frame");
     if (!frames.length) return;
     eventImageIndex = ((index % frames.length) + frames.length) % frames.length;
     frames.forEach(function(frame, frameIndex) {
@@ -742,12 +742,12 @@ function showEventFullscreenImage(container, index) {
 
 function startEventImageRotation(container) {
     stopEventImageRotation();
-    var frames = container.querySelectorAll(".tv-event-fullscreen-frame");
+    var frames = container.querySelectorAll(".tv-event-rotation-frame");
     eventImageIndex = 0;
-    showEventFullscreenImage(container, eventImageIndex);
+    showEventRotationItem(container, eventImageIndex);
     if (frames.length < 2) return;
     eventImageTimer = window.setInterval(function() {
-        showEventFullscreenImage(container, eventImageIndex + 1);
+        showEventRotationItem(container, eventImageIndex + 1);
     }, 6000);
 }
 
@@ -755,6 +755,60 @@ function leaveEventFullscreenMode(container, slideContent) {
     stopEventImageRotation();
     container.classList.remove("tv-events-container--fullscreen");
     if (slideContent) slideContent.classList.remove("tv-slide-content--fullscreen-event");
+}
+
+function eventImages(event) {
+    var images = Array.isArray(event && event.images)
+        ? event.images
+        : (event && event.images && typeof event.images === "object" ? Object.values(event.images) : []);
+    if (!images.length && event && event.image) images = [{ secure_url: event.image }];
+    return images.map(function(image) {
+        return typeof image === "string" ? image : image && image.secure_url;
+    }).filter(Boolean);
+}
+
+function buildEventRotationItems(activeEventEntries) {
+    var items = [];
+    activeEventEntries.forEach(function(entry) {
+        var eventId = entry[0];
+        var event = entry[1] || {};
+        var images = eventImages(event);
+        if (images.length) {
+            images.forEach(function(url, imageIndex) {
+                items.push({
+                    kind: "image",
+                    eventId: eventId,
+                    imageIndex: imageIndex,
+                    url: url,
+                    title: event.title || "이벤트 이미지"
+                });
+            });
+            return;
+        }
+        items.push({
+            kind: "text",
+            eventId: eventId,
+            title: event.title || "이벤트",
+            description: event.description || "",
+            startDate: event.startDate || "",
+            endDate: event.endDate || ""
+        });
+    });
+    return items;
+}
+
+function renderEventTextCard(item) {
+    var html = "<article class='tv-event-card'>";
+    html += "  <div class='tv-event-title'>" + escapeHtml(item.title) + "</div>";
+    if (item.startDate || item.endDate) {
+        html += "  <div class='tv-event-period'>" + escapeHtml(item.startDate) +
+            (item.endDate ? " — " + escapeHtml(item.endDate) : "부터") + "</div>";
+    }
+    if (item.description) {
+        html += "  <div class='tv-event-desc'>" + escapeHtml(item.description) + "</div>";
+    }
+    html += "</article>";
+    return html;
 }
 
 function applyTvContentAvailability(slideId, hasContent) {
@@ -781,7 +835,7 @@ function renderEvents(events) {
         tvHadActiveEvents = false;
         return;
     }
-        var activeEvents = [];
+        var activeEventEntries = [];
         var keys = Object.keys(events);
         var today = tvSubscribedDate || formatLocalDate(new Date());
 
@@ -789,12 +843,12 @@ function renderEvents(events) {
             var event = events[keys[i]];
             if (event && event.enabled !== false) {
                 if (TVCommon.isActive(event, today)) {
-                    activeEvents.push(event);
+                    activeEventEntries.push([keys[i], event]);
                 }
             }
         }
 
-        if (activeEvents.length === 0) {
+        if (activeEventEntries.length === 0) {
             applyTvContentAvailability("events", false);
             if (container.dataset.renderSignature === "empty") return;
             container.dataset.renderSignature = "empty";
@@ -807,66 +861,47 @@ function renderEvents(events) {
         applyTvContentAvailability("events", true);
         tvHadActiveEvents = true;
 
-        activeEvents = TVCommon.sortEvents(activeEvents.map(function(event, index) {
-            return [String(index), event];
-        })).map(function(entry) { return entry[1]; });
-        var fullscreenImages = [];
-        activeEvents.forEach(function(event) {
-            var images = Array.isArray(event.images) ? event.images : (event.images && typeof event.images === "object" ? Object.values(event.images) : []);
-            if (!images.length && event.image) images = [{ secure_url: event.image }];
-            images.forEach(function(image) {
-                var url = typeof image === "string" ? image : image && image.secure_url;
-                if (url) fullscreenImages.push({ url: url, title: event.title || "이벤트 이미지" });
-            });
-        });
-
-        if (fullscreenImages.length) {
-            var imageSignature = "images:" + JSON.stringify(fullscreenImages.map(function(image) { return image.url; }));
-            if (container.dataset.renderSignature === imageSignature) return;
-            container.dataset.renderSignature = imageSignature;
-            container.classList.add("tv-events-container--fullscreen");
-            if (slideContent) slideContent.classList.add("tv-slide-content--fullscreen-event");
-            container.innerHTML = '<div class="tv-event-fullscreen">' + fullscreenImages.map(function(image, index) {
-                return '<figure class="tv-event-fullscreen-frame' + (index === 0 ? " is-active" : "") + '">' +
-                    '<img src="' + escapeHtml(image.url) + '" alt="' + escapeHtml(image.title) + '"></figure>';
-            }).join("") + '</div>';
-            container.querySelectorAll(".tv-event-fullscreen-frame img").forEach(function(image) {
-                image.addEventListener("error", function() {
-                    var frame = image.closest(".tv-event-fullscreen-frame");
-                    if (frame) frame.remove();
-                    var remaining = container.querySelectorAll(".tv-event-fullscreen-frame");
-                    if (!remaining.length) {
-                        leaveEventFullscreenMode(container, slideContent);
-                        container.innerHTML = "<div class='tv-events-empty'>이벤트 이미지를 불러오지 못했습니다</div>";
-                        return;
-                    }
-                    startEventImageRotation(container);
-                }, { once: true });
-            });
-            startEventImageRotation(container);
-            return;
-        }
-
-        var textSignature = "text:" + JSON.stringify(activeEvents.map(function(event) {
-            return { title: event.title || "", description: event.description || "", startDate: event.startDate || "", endDate: event.endDate || "" };
+        activeEventEntries = TVCommon.sortEvents(activeEventEntries);
+        var rotationItems = buildEventRotationItems(activeEventEntries);
+        var rotationSignature = "rotation:" + JSON.stringify(rotationItems.map(function(item) {
+            return item.kind === "image"
+                ? { kind: item.kind, eventId: item.eventId, imageIndex: item.imageIndex, url: item.url, title: item.title }
+                : {
+                    kind: item.kind,
+                    eventId: item.eventId,
+                    title: item.title,
+                    description: item.description,
+                    startDate: item.startDate,
+                    endDate: item.endDate
+                };
         }));
-        if (container.dataset.renderSignature === textSignature) return;
-        container.dataset.renderSignature = textSignature;
-        leaveEventFullscreenMode(container, slideContent);
-        var html = "";
-        for (var j = 0; j < activeEvents.length; j++) {
-            var evt = activeEvents[j];
-            html += "<div class='tv-event-card'>";
-            html += "  <div class='tv-event-title'>" + escapeHtml(evt.title || "이벤트") + "</div>";
-            if (evt.startDate || evt.endDate) {
-                html += "  <div class='tv-event-period'>" + escapeHtml(evt.startDate || "") + (evt.endDate ? " — " + escapeHtml(evt.endDate) : "부터") + "</div>";
+        if (container.dataset.renderSignature === rotationSignature) return;
+        container.dataset.renderSignature = rotationSignature;
+        container.classList.add("tv-events-container--fullscreen");
+        if (slideContent) slideContent.classList.add("tv-slide-content--fullscreen-event");
+        container.innerHTML = '<div class="tv-event-rotation">' + rotationItems.map(function(item, index) {
+            var activeClass = index === 0 ? " is-active" : "";
+            if (item.kind === "image") {
+                return '<figure class="tv-event-rotation-frame tv-event-rotation-frame--image' + activeClass + '">' +
+                    '<img src="' + escapeHtml(item.url) + '" alt="' + escapeHtml(item.title) + '"></figure>';
             }
-            if (evt.description) {
-                html += "  <div class='tv-event-desc'>" + escapeHtml(evt.description) + "</div>";
-            }
-            html += "</div>";
-        }
-        container.innerHTML = html;
+            return '<section class="tv-event-rotation-frame tv-event-rotation-frame--text' + activeClass + '">' +
+                renderEventTextCard(item) + '</section>';
+        }).join("") + '</div>';
+        container.querySelectorAll(".tv-event-rotation-frame--image img").forEach(function(image) {
+            image.addEventListener("error", function() {
+                var frame = image.closest(".tv-event-rotation-frame");
+                if (frame) frame.remove();
+                var remaining = container.querySelectorAll(".tv-event-rotation-frame");
+                if (!remaining.length) {
+                    leaveEventFullscreenMode(container, slideContent);
+                    container.innerHTML = "<div class='tv-events-empty'>이벤트 정보를 불러오지 못했습니다</div>";
+                    return;
+                }
+                startEventImageRotation(container);
+            }, { once: true });
+        });
+        startEventImageRotation(container);
 }
 
 function subscribeEvents(generation) {

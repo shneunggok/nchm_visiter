@@ -402,36 +402,51 @@ html, body {
     display: block;
 }
 
-.tv-event-fullscreen,
-.tv-event-fullscreen-frame {
+.tv-event-rotation,
+.tv-event-rotation-frame {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     margin: 0;
     overflow: hidden;
-    background: var(--tv-bg-primary);
 }
 
-.tv-event-fullscreen-frame {
+.tv-event-rotation-frame {
     opacity: 0;
     pointer-events: none;
     transition: opacity .6s ease;
 }
 
-.tv-event-fullscreen-frame.is-active {
+.tv-event-rotation-frame.is-active {
     opacity: 1;
 }
 
-.tv-event-fullscreen-frame img {
+.tv-event-rotation-frame--image {
+    background: var(--tv-bg-primary);
+}
+
+.tv-event-rotation-frame--image img {
     display: block;
     width: 100vw;
     height: 100vh;
     object-fit: contain;
 }
 
-body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-bg-overlay,
-body:has(#slide-events.active-slide .tv-event-fullscreen) .tv-indicator {
+.tv-event-rotation-frame--text {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: clamp(40px, 7vw, 120px);
+}
+
+.tv-event-rotation-frame--text .tv-event-card {
+    width: min(980px, 88vw);
+    opacity: 1;
+}
+
+body:has(#slide-events.active-slide .tv-event-rotation-frame--image.is-active) .tv-bg-overlay,
+body:has(#slide-events.active-slide .tv-event-rotation-frame--image.is-active) .tv-indicator {
     display: none;
 }
 

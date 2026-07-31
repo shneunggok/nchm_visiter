@@ -84,6 +84,7 @@ let tvSubscribedDate = "";
 let tvEventsCache = null;
 let tvNoticesCache = null;
 let tvArReservationsCache = [];
+let tvArRenderedMinute = "";
 let tvPreviewDraft = null;
 let tvHadActiveEvents = false;
 let tvHadActiveNotices = false;
@@ -171,6 +172,11 @@ function updateClock() {
     TV_DOM.dateDisplay.textContent = year + "년 " + month + "월 " + day + "일 " + dayName;
 
     const today = formatLocalDate(now);
+    const arMinuteKey = today + "T" + hours + ":" + minutes;
+    if (tvArRenderedMinute !== arMinuteKey) {
+        tvArRenderedMinute = arMinuteKey;
+        renderTvArReservations(tvArReservationsCache, today);
+    }
     if (tvRealtimeSubscribed && tvSubscribedDate !== today) {
         tvSubscribedDate = today;
         subscribeTodayVisitors();
@@ -761,52 +767,118 @@ function normalizeTvArReservations(records, dateKey, now) {
     });
 }
 
+function buildTvArSchedule(records, dateKey, now) {
+    var current = now || new Date();
+    var reservations = normalizeTvArReservations(records, dateKey, current);
+    var reservationGroups = new Map();
+    reservations.forEach(function(reservation) {
+        if (!reservationGroups.has(reservation.timeSlot)) {
+            reservationGroups.set(reservation.timeSlot, []);
+        }
+        reservationGroups.get(reservation.timeSlot).push(reservation);
+    });
+
+    var operatingTimes = getArOperatingSchedule(current).slots.map(function(slot) {
+        return slot.time;
+    });
+    var extraTimes = Array.from(reservationGroups.keys()).filter(function(timeSlot) {
+        return operatingTimes.indexOf(timeSlot) === -1;
+    });
+    var allTimes = operatingTimes.concat(extraTimes).sort(function(first, second) {
+        return tvArTimeMinutes(first) - tvArTimeMinutes(second);
+    });
+    var currentMinutes = current.getHours() * 60 + current.getMinutes();
+
+    return {
+        reservations: reservations,
+        slots: allTimes.map(function(timeSlot) {
+            var slotReservations = reservationGroups.get(timeSlot) || [];
+            var users = slotReservations.reduce(function(allUsers, reservation) {
+                return allUsers.concat(reservation.users);
+            }, []);
+            var startMinutes = tvArTimeMinutes(timeSlot);
+            var timeState = currentMinutes >= startMinutes + 30
+                ? "past"
+                : currentMinutes >= startMinutes ? "current" : "upcoming";
+            return {
+                timeSlot: timeSlot,
+                reservations: slotReservations,
+                users: users,
+                timeState: timeState,
+                isExtra: operatingTimes.indexOf(timeSlot) === -1
+            };
+        })
+    };
+}
+
 function renderTvArReservations(records, dateKey) {
     var today = dateKey || formatLocalDate(new Date());
-    var reservations = normalizeTvArReservations(records, today, new Date());
+    var schedule = buildTvArSchedule(records, today, new Date());
+    var reservations = schedule.reservations;
     if (TV_DOM.arCount) TV_DOM.arCount.textContent = reservations.length;
     if (TV_DOM.arDateLabel) {
         var dateParts = today.split("-");
         TV_DOM.arDateLabel.textContent = dateParts.length === 3
-            ? dateParts[0] + "." + dateParts[1] + "." + dateParts[2] + " · 이용시간 순"
+            ? dateParts[0] + "." + dateParts[1] + "." + dateParts[2] + " · 전체 운영시간"
             : today;
     }
 
     var grid = TV_DOM.arReservationGrid;
     if (grid) {
-        grid.classList.toggle("is-dense", reservations.length > 12);
-        if (!reservations.length) {
-            grid.innerHTML = '<div class="tv-ar-reservation-empty"><span>AR</span>' +
-                '<strong>오늘 등록된 AR 예약이 없습니다</strong></div>';
-        } else {
-            grid.innerHTML = reservations.map(function(reservation, index) {
-                var maskedNames = reservation.users.map(function(user) {
+        grid.classList.toggle("is-dense", schedule.slots.length > 12);
+        grid.innerHTML = schedule.slots.map(function(slot, index) {
+            var hasReservation = slot.reservations.length > 0;
+            var stateClass = slot.timeState === "current"
+                ? " is-current"
+                : slot.timeState === "past" ? " is-past" : "";
+            var extraClass = slot.isExtra ? " is-extra" : "";
+            var emptyClass = hasReservation ? "" : " is-empty";
+            var primaryText = "";
+            var secondaryText = "";
+            var statusText = "";
+
+            if (hasReservation) {
+                var maskedNames = slot.users.map(function(user) {
                     return maskTvArReservationName(user.name);
                 });
-                var representative = maskedNames[0] || "이용자";
-                var additionalNames = maskedNames.slice(1, 3).join(" · ");
+                primaryText = maskedNames[0] || "이용자";
+                secondaryText = maskedNames.slice(1, 3).join(" · ");
                 if (maskedNames.length > 3) {
-                    additionalNames += (additionalNames ? " · " : "") + "외 " + (maskedNames.length - 3) + "명";
+                    secondaryText += (secondaryText ? " · " : "") + "외 " + (maskedNames.length - 3) + "명";
                 }
-                if (!additionalNames) additionalNames = "예약자 정보 보호 표시";
-                var stateClass = reservation.timeState === "current"
-                    ? " is-current"
-                    : reservation.timeState === "past" ? " is-past" : "";
-                return '<article class="tv-ar-reservation-card' + stateClass +
-                    '" style="animation-delay:' + Math.min(index * 45, 360) + 'ms">' +
-                    '<time class="tv-ar-reservation-time">' + escapeHtml(reservation.timeSlot) + '</time>' +
-                    '<div class="tv-ar-reservation-person"><strong>' + escapeHtml(representative) + '</strong>' +
-                    '<span>' + escapeHtml(additionalNames) + '</span></div>' +
-                    '<b class="tv-ar-reservation-count">' + reservation.users.length + '명</b></article>';
-            }).join("");
-        }
+                if (!secondaryText) secondaryText = "예약자 정보 보호 표시";
+                if (slot.reservations.length > 1) {
+                    secondaryText += " · " + slot.reservations.length + "팀";
+                }
+                if (slot.timeState === "current") secondaryText = "현재 이용 시간 · " + secondaryText;
+                if (slot.timeState === "past") secondaryText = "✓ 이용 완료 · " + secondaryText;
+                statusText = slot.users.length + "명";
+            } else if (slot.timeState === "past") {
+                primaryText = "운영 종료";
+                secondaryText = "지난 이용 시간";
+                statusText = "✓";
+            } else if (slot.timeState === "current") {
+                primaryText = "예약 없음";
+                secondaryText = "현재 이용 시간";
+                statusText = "NOW";
+            } else {
+                primaryText = "예약 없음";
+                secondaryText = "등록된 예약 없음";
+                statusText = "—";
+            }
+
+            return '<article class="tv-ar-reservation-card' + stateClass + extraClass + emptyClass +
+                '" style="animation-delay:' + Math.min(index * 35, 280) + 'ms">' +
+                '<time class="tv-ar-reservation-time">' + escapeHtml(slot.timeSlot) + '</time>' +
+                '<div class="tv-ar-reservation-person"><strong>' + escapeHtml(primaryText) + '</strong>' +
+                '<span>' + escapeHtml(secondaryText) + '</span></div>' +
+                '<b class="tv-ar-reservation-count">' + escapeHtml(statusText) + '</b></article>';
+        }).join("");
     }
 
     var message = document.getElementById("tv-ar-message");
     if (message) {
-        message.textContent = reservations.length
-            ? "오늘 예약을 이용시간 순으로 표시합니다 · 이름 가운데 글자는 보호 처리됩니다."
-            : "오늘 등록된 AR 예약이 없습니다.";
+        message.textContent = "당일 전체 운영시간을 표시합니다 · 지난 시간은 완료 상태로 구분하며 예약자 이름은 보호 처리됩니다.";
     }
     return reservations;
 }

@@ -820,6 +820,19 @@ function createTvRecoveryTestContext() {
         arLogsRef,
         firebase: { database: { ServerValue: { TIMESTAMP: 123 } } },
         formatLocalDate() { return "2026-07-29"; },
+        getArOperatingSchedule(date) {
+            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+            const lastHour = isWeekend ? 17 : 20;
+            const slots = [];
+            for (let hour = 10; hour <= lastHour; hour += 1) {
+                if (hour === 12) continue;
+                for (const minute of ["00", "30"]) {
+                    if (hour === lastHour && minute === "30") continue;
+                    slots.push({ time: `${String(hour).padStart(2, "0")}:${minute}` });
+                }
+            }
+            return { slots };
+        },
         escapeHtml(value) { return String(value || ""); },
         TVCommon: {
             shouldWriteStatus() { return false; },
@@ -1041,7 +1054,7 @@ test("TV event rendering includes every mixed event while showing one frame at a
 
 test("TV AR reservations use today's utilization time and mask participant names", () => {
     const { context } = createTvRecoveryTestContext();
-    const reservations = context.normalizeTvArReservations([
+    const sourceRecords = [
         {
             _key: "late",
             date: "2026-07-29",
@@ -1070,12 +1083,30 @@ test("TV AR reservations use today's utilization time and mask participant names
             users: [{ name: "잘못된시간" }],
             createdAt: 4
         }
-    ], "2026-07-29", new Date(2026, 6, 29, 9, 0));
+    ];
+    const reservations = context.normalizeTvArReservations(
+        sourceRecords,
+        "2026-07-29",
+        new Date(2026, 6, 29, 9, 0)
+    );
+    const schedule = context.buildTvArSchedule(
+        sourceRecords,
+        "2026-07-29",
+        new Date(2026, 6, 29, 15, 5)
+    );
 
     assert.deepEqual(
         Array.from(reservations, (reservation) => reservation.timeSlot),
         ["10:00", "20:00"]
     );
+    assert.equal(schedule.slots.length, 19);
+    assert.equal(schedule.slots[0].timeSlot, "10:00");
+    assert.equal(schedule.slots.at(-1).timeSlot, "20:00");
+    assert.equal(schedule.slots.some((slot) => slot.timeSlot.startsWith("12:")), false);
+    assert.equal(schedule.slots.find((slot) => slot.timeSlot === "10:00").timeState, "past");
+    assert.equal(schedule.slots.find((slot) => slot.timeSlot === "15:00").timeState, "current");
+    assert.equal(schedule.slots.find((slot) => slot.timeSlot === "20:00").timeState, "upcoming");
+    assert.equal(schedule.slots.find((slot) => slot.timeSlot === "10:30").reservations.length, 0);
     assert.equal(context.maskTvArReservationName("김민수"), "김*수");
     assert.equal(context.maskTvArReservationName("이서"), "이*");
     assert.equal(context.maskTvArReservationName("박"), "*");

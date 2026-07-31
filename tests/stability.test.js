@@ -56,6 +56,27 @@ test("shared utilities reject impossible dates and normalize Firebase collection
     assert.deepEqual(Array.from(context.toArray({ a: 1, b: 2 })), [1, 2]);
     assert.deepEqual(Array.from(context.toArray("invalid")), []);
     assert.equal(context.escapeCsvCell('쉼표,줄바꿈\n"따옴표"'), '"쉼표,줄바꿈\n""따옴표"""');
+    assert.deepEqual(
+        Array.from(context.getArOperatingSchedule(new Date(2026, 6, 31)).slots, (slot) => slot.time),
+        [
+            "10:00", "10:30", "11:00", "11:30", "13:00", "13:30",
+            "14:00", "14:30", "15:00", "15:30", "16:00", "16:30",
+            "17:00", "17:30", "18:00", "18:30", "19:00", "19:30", "20:00"
+        ]
+    );
+    assert.deepEqual(
+        Array.from(context.getArOperatingSchedule(new Date(2026, 7, 1)).slots, (slot) => slot.time),
+        [
+            "10:00", "10:30", "11:00", "11:30", "13:00", "13:30",
+            "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00"
+        ]
+    );
+    assert.equal(context.getArTimeMinutes("9:00"), 540);
+    assert.equal(context.getArTimeMinutes("10:00"), 600);
+    assert.equal(context.getArTimeMinutes("25:00"), null);
+    assert.equal(context.normalizeArTimeSlot("9:00"), "09:00");
+    assert.equal(context.normalizeArTimeSlot("10:30"), "10:30");
+    assert.equal(context.normalizeArTimeSlot("invalid"), "");
 });
 
 test("multi-person visit submission uses one atomic root update", async () => {
@@ -747,11 +768,10 @@ function createTvRecoveryTestContext() {
             return query;
         }
     };
-    const arSlotLocksRef = {
-        orderByKey() {
+    const arLogsRef = {
+        orderByChild() {
             const query = createListenerRef("ar-query");
-            query.startAt = () => query;
-            query.endAt = () => query;
+            query.equalTo = () => query;
             query.limitToLast = () => query;
             arQueries.push(query);
             return query;
@@ -797,7 +817,7 @@ function createTvRecoveryTestContext() {
         auth,
         db: { ref: fixedRef },
         visitLogsRef,
-        arSlotLocksRef,
+        arLogsRef,
         firebase: { database: { ServerValue: { TIMESTAMP: 123 } } },
         formatLocalDate() { return "2026-07-29"; },
         escapeHtml(value) { return String(value || ""); },
@@ -1019,6 +1039,48 @@ test("TV event rendering includes every mixed event while showing one frame at a
     assert.equal(slideClasses.has("tv-slide-content--fullscreen-event"), true);
 });
 
+test("TV AR reservations use today's utilization time and mask participant names", () => {
+    const { context } = createTvRecoveryTestContext();
+    const reservations = context.normalizeTvArReservations([
+        {
+            _key: "late",
+            date: "2026-07-29",
+            timeSlot: "20:00",
+            users: [{ name: "김민수" }],
+            createdAt: 1
+        },
+        {
+            _key: "other-day",
+            date: "2026-07-28",
+            timeSlot: "09:00",
+            users: [{ name: "전날예약" }],
+            createdAt: 2
+        },
+        {
+            _key: "early",
+            date: "2026-07-29",
+            timeSlot: "10:00",
+            users: [{ name: "이서연" }, { name: "박지훈" }],
+            createdAt: 3
+        },
+        {
+            _key: "invalid",
+            date: "2026-07-29",
+            timeSlot: "25:00",
+            users: [{ name: "잘못된시간" }],
+            createdAt: 4
+        }
+    ], "2026-07-29", new Date(2026, 6, 29, 9, 0));
+
+    assert.deepEqual(
+        Array.from(reservations, (reservation) => reservation.timeSlot),
+        ["10:00", "20:00"]
+    );
+    assert.equal(context.maskTvArReservationName("김민수"), "김*수");
+    assert.equal(context.maskTvArReservationName("이서"), "이*");
+    assert.equal(context.maskTvArReservationName("박"), "*");
+});
+
 test("TV automatically restores one realtime subscription set after forced admin logout", () => {
     const state = createTvRecoveryTestContext();
     const { context, auth, refs, visitQueries, arQueries } = state;
@@ -1235,7 +1297,7 @@ test("12-hour TV soak keeps subscriptions, timers, and heap bounded across admin
     const coreSources = [
         "tvSettings",
         "visitLogs",
-        "arSlotLocks",
+        "arLogs",
         "attendanceEvents",
         "events",
         "notices"
@@ -1521,6 +1583,8 @@ function createAdminExportTestContext(options = {}) {
         return elements.get(id);
     };
     const document = {
+        body: { style: { overflow: "" } },
+        activeElement: null,
         getElementById,
         querySelectorAll() { return []; },
         createElement(tag) {
@@ -1612,6 +1676,87 @@ function csvArRecord(index, overrides = {}) {
         ...overrides
     };
 }
+
+test("admin AR schedule shows today's slots in utilization-time order with full detail data", () => {
+    const { context } = createAdminExportTestContext();
+    const groups = context.buildAdminArTodaySchedule([
+        {
+            _key: "late",
+            date: "2026-07-15",
+            timeSlot: "20:00",
+            users: [{ name: "김민수", gender: "남", age: "성인(40세 이상)" }]
+        },
+        {
+            _key: "early",
+            date: "2026-07-15",
+            timeSlot: "10:00",
+            users: [
+                { name: "이서연", gender: "여", age: "성인(40세 이상)" },
+                { name: "박지훈", gender: "남", age: "성인(40세 이상)" }
+            ]
+        },
+        {
+            _key: "other-day",
+            date: "2026-07-14",
+            timeSlot: "09:00",
+            users: [{ name: "전날예약", gender: "남", age: "성인(40세 이상)" }]
+        }
+    ], "2026-07-15", new Date(2026, 6, 15, 9, 0));
+    const reserved = Array.from(groups).filter((group) => group.logs.length);
+
+    assert.deepEqual(
+        reserved.map((group) => group.timeSlot),
+        ["10:00", "20:00"]
+    );
+    assert.equal(reserved[0].representative, "이서연");
+    assert.deepEqual(
+        Array.from(reserved[0].users, (user) => ({ name: user.name, gender: user.gender })),
+        [
+            { name: "이서연", gender: "여" },
+            { name: "박지훈", gender: "남" }
+        ]
+    );
+});
+
+test("admin AR schedule keeps exactly one bounded today subscription", () => {
+    const calls = [];
+    const query = {
+        equalTo(value) {
+            calls.push(["equalTo", value]);
+            return query;
+        },
+        limitToLast(value) {
+            calls.push(["limitToLast", value]);
+            return query;
+        },
+        on(eventName) {
+            calls.push(["on", eventName]);
+        },
+        off() {
+            calls.push(["off"]);
+        }
+    };
+    const arRef = {
+        orderByChild(field) {
+            calls.push(["orderByChild", field]);
+            return query;
+        }
+    };
+    const { context } = createAdminExportTestContext({ arRef });
+
+    assert.equal(context.subscribeAdminArTodaySchedule(), true);
+    assert.equal(context.subscribeAdminArTodaySchedule(), true);
+    assert.equal(calls.filter(([name]) => name === "on").length, 1);
+    assert.deepEqual(calls.filter(([name]) => name === "orderByChild"), [
+        ["orderByChild", "date"]
+    ]);
+    assert.deepEqual(calls.filter(([name]) => name === "limitToLast"), [
+        ["limitToLast", 50]
+    ]);
+
+    context.unsubscribeAdminArTodaySchedule();
+    assert.equal(calls.filter(([name]) => name === "off").length, 1);
+});
 
 test("period CSV exports 0, 1, 100, 101, and 1001 records without omissions or duplicates", async (t) => {
     for (const type of ["visit", "ar"]) {

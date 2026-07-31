@@ -324,6 +324,356 @@ body.theme-admin { background-color: #f8fafc; }
     opacity: 0.6;
 }
 
+/* ==================== 관리자 오늘 AR 예약 시간표 ==================== */
+
+.admin-ar-today-panel {
+    overflow: hidden;
+    border: 1px solid #c7d2fe;
+    border-radius: 28px;
+    padding: clamp(20px, 3vw, 32px);
+    background:
+        radial-gradient(circle at 92% 8%, rgba(129, 140, 248, .16), transparent 34%),
+        linear-gradient(145deg, #ffffff, #f8faff);
+}
+
+.admin-ar-today-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 24px;
+}
+
+.admin-ar-today-kicker,
+.admin-ar-detail-kicker {
+    margin: 0 0 5px;
+    color: #6366f1;
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .14em;
+}
+
+.admin-ar-today-header h2,
+.admin-ar-detail-header h3 {
+    margin: 0;
+    color: #312e81;
+    font-size: clamp(1.3rem, 2vw, 1.75rem);
+    font-weight: 900;
+    letter-spacing: -.025em;
+}
+
+.admin-ar-today-date {
+    margin-top: 7px;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.admin-ar-today-count {
+    flex: 0 0 auto;
+    padding: 9px 14px;
+    border: 1px solid #c7d2fe;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #4338ca;
+    font-size: 13px;
+    font-weight: 900;
+}
+
+.admin-ar-today-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.admin-ar-slot-card {
+    min-height: 112px;
+    border: 1px solid #e2e8f0;
+    border-radius: 18px;
+    padding: 15px;
+    background: rgba(255, 255, 255, .9);
+    color: #64748b;
+    text-align: left;
+}
+
+button.admin-ar-slot-card {
+    width: 100%;
+    cursor: pointer;
+    transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+
+button.admin-ar-slot-card:hover {
+    transform: translateY(-2px);
+    border-color: #818cf8;
+    box-shadow: 0 12px 24px rgba(79, 70, 229, .14);
+}
+
+button.admin-ar-slot-card:focus-visible {
+    outline: 3px solid rgba(99, 102, 241, .3);
+    outline-offset: 3px;
+}
+
+.admin-ar-slot-card.is-reserved {
+    border-color: #a5b4fc;
+    background: linear-gradient(145deg, #eef2ff, #ffffff);
+    color: #3730a3;
+}
+
+.admin-ar-slot-card.is-current {
+    border-color: #34d399;
+    background: linear-gradient(145deg, #ecfdf5, #ffffff);
+    box-shadow: inset 0 0 0 1px rgba(52, 211, 153, .18);
+}
+
+.admin-ar-slot-card.is-past {
+    opacity: .65;
+}
+
+.admin-ar-slot-card.is-extra {
+    border-style: dashed;
+}
+
+.admin-ar-slot-time {
+    display: block;
+    color: #312e81;
+    font-size: 1.15rem;
+    font-weight: 950;
+    font-variant-numeric: tabular-nums;
+}
+
+.admin-ar-slot-label {
+    display: block;
+    margin-top: 10px;
+    overflow: hidden;
+    color: inherit;
+    font-size: 13px;
+    font-weight: 850;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.admin-ar-slot-meta {
+    display: block;
+    margin-top: 4px;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.admin-ar-slot-card.is-current .admin-ar-slot-meta {
+    color: #047857;
+}
+
+.admin-ar-today-loading {
+    grid-column: 1 / -1;
+    padding: 32px;
+    border: 1px dashed #c7d2fe;
+    border-radius: 18px;
+    color: #6366f1;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.admin-ar-today-status {
+    margin: 18px 2px 0;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.admin-ar-today-status[data-state="error"] {
+    color: #b91c1c;
+}
+
+.admin-ar-detail-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 180;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    background: rgba(15, 23, 42, .72);
+    backdrop-filter: blur(7px);
+}
+
+.admin-ar-detail-modal.hidden {
+    display: none;
+}
+
+.admin-ar-detail-dialog {
+    width: min(520px, 100%);
+    max-height: calc(100dvh - 36px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #c7d2fe;
+    border-radius: 28px;
+    background: #ffffff;
+    box-shadow: 0 30px 80px rgba(15, 23, 42, .35);
+}
+
+.admin-ar-detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 24px 26px 18px;
+    border-bottom: 1px solid #eef2ff;
+}
+
+.admin-ar-detail-close {
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    border: 0;
+    border-radius: 12px;
+    background: #f1f5f9;
+    color: #475569;
+    font-size: 25px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.admin-ar-detail-content {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    padding: 22px 26px;
+}
+
+.admin-ar-detail-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.admin-ar-detail-summary > div {
+    padding: 14px;
+    border-radius: 16px;
+    background: #f8fafc;
+}
+
+.admin-ar-detail-summary span {
+    display: block;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 750;
+}
+
+.admin-ar-detail-summary strong {
+    display: block;
+    margin-top: 4px;
+    color: #312e81;
+    font-size: 1rem;
+    font-weight: 900;
+}
+
+.admin-ar-detail-list-title {
+    margin-bottom: 10px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 900;
+}
+
+.admin-ar-detail-warning {
+    margin: -6px 0 18px;
+    padding: 10px 12px;
+    border: 1px solid #fed7aa;
+    border-radius: 12px;
+    background: #fff7ed;
+    color: #9a3412;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.admin-ar-detail-list {
+    display: grid;
+    gap: 8px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.admin-ar-detail-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 13px 15px;
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    background: #ffffff;
+}
+
+.admin-ar-detail-list strong {
+    color: #1e293b;
+    font-size: 14px;
+}
+
+.admin-ar-detail-list span {
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #4f46e5;
+    font-size: 11px;
+    font-weight: 850;
+}
+
+.admin-ar-detail-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 16px 26px 22px;
+    border-top: 1px solid #eef2ff;
+}
+
+.admin-ar-detail-confirm {
+    min-width: 96px;
+    border: 0;
+    border-radius: 14px;
+    padding: 11px 18px;
+    background: #4f46e5;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+@media (max-width: 900px) {
+    .admin-ar-today-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 540px) {
+    .admin-ar-today-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .admin-ar-today-count {
+        align-self: flex-start;
+    }
+
+    .admin-ar-today-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 9px;
+    }
+
+    .admin-ar-slot-card {
+        min-height: 104px;
+        padding: 13px;
+    }
+
+    .admin-ar-detail-summary {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* ==================== 관리자 셀렉트 박스 ==================== */
 
 .admin-select {

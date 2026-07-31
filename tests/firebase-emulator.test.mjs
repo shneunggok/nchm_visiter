@@ -332,6 +332,13 @@ test("the real AR claim, slot transaction, and atomic log flow succeeds", async 
     assert.equal(savedLog.users.length, 2);
     assert.equal(savedLog.createdAt, claim.createdAt);
     assert.equal((await assertSucceeds(get(ref(adminDb(), `arSlotLocks/${date}_10:00`)))).val(), requestIdA);
+    const todaySchedule = await assertSucceeds(get(query(
+        ref(database, "arLogs"),
+        orderByChild("date"),
+        equalTo(date),
+        limitToLast(50)
+    )));
+    assert.equal(todaySchedule.size, 1);
 
     const replay = await reserveArRequest(database, "ar-user", requestIdA, payloadHashA);
     assert.equal(replay.replayed, true);

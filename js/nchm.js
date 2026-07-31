@@ -321,36 +321,24 @@ function addTimeBtn(container, h, m, reservedSlots) {
 function generateTimeSlots() {
     dom.timeContainer.innerHTML = "";
     const now = new Date();
-    const day = now.getDay();
-    const isWeekend = day === 0 || day === 6;
+    const schedule = getArOperatingSchedule(now);
     const todayStr = formatLocalDate(now);
     const reservedSlots = arLogsToday
         .filter((log) => log.date === todayStr)
         .map((log) => log.timeSlot);
 
-    if (isWeekend) {
-        dom.arDayIndicator.innerText = "🗓️ 주말 운영 (10:00~17:30)";
+    if (schedule.isWeekend) {
+        dom.arDayIndicator.innerText = `🗓️ ${schedule.label}`;
         dom.arDayIndicator.className = "mb-4 inline-block px-4 py-1.5 rounded-full text-xs font-bold bg-orange-100 text-orange-700";
-
-        for (let h = 10; h < 18; h += 1) {
-            if (h === 12) continue;
-            ["00", "30"].forEach((m) => {
-                if (h === 17 && m === "30") return;
-                addTimeBtn(dom.timeContainer, h, m, reservedSlots);
-            });
-        }
     } else {
-        dom.arDayIndicator.innerText = "🗓️ 평일 운영 (10:00~20:30)";
+        dom.arDayIndicator.innerText = `🗓️ ${schedule.label}`;
         dom.arDayIndicator.className = "mb-4 inline-block px-4 py-1.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700";
-
-        for (let h = 10; h <= 20; h += 1) {
-            if (h === 12) continue;
-            ["00", "30"].forEach((m) => {
-                if (h === 20 && m === "30") return;
-                addTimeBtn(dom.timeContainer, h, m, reservedSlots);
-            });
-        }
     }
+
+    schedule.slots.forEach((slot) => {
+        const [hour, minute] = slot.time.split(":");
+        addTimeBtn(dom.timeContainer, Number(hour), minute, reservedSlots);
+    });
 
     refreshIcons();
 }
@@ -826,6 +814,8 @@ function refreshDateSensitiveState() {
         dom.startDate.value = nextDate;
         dom.endDate.value = nextDate;
         subscribeArLogsToday();
+    } else if (typeof refreshAdminArTodayScheduleDate === "function") {
+        refreshAdminArTodayScheduleDate();
     }
     renderAttendanceEventBanner(attendanceEventsState);
     generateTimeSlots();

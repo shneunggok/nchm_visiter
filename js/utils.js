@@ -14,6 +14,14 @@ const dom = {
     sectionAdmin: document.getElementById("section-admin"),
     adminVisitLogs: document.getElementById("admin-visit-logs"),
     adminArLogs: document.getElementById("admin-ar-logs"),
+    adminArTodayDate: document.getElementById("admin-ar-today-date"),
+    adminArTodayCount: document.getElementById("admin-ar-today-count"),
+    adminArTodayGrid: document.getElementById("admin-ar-today-grid"),
+    adminArTodayStatus: document.getElementById("admin-ar-today-status"),
+    adminArDetailModal: document.getElementById("admin-ar-detail-modal"),
+    adminArDetailContent: document.getElementById("admin-ar-detail-content"),
+    adminArDetailClose: document.getElementById("admin-ar-detail-close"),
+    adminArDetailConfirm: document.getElementById("admin-ar-detail-confirm"),
     visitUserContainer: document.getElementById("visit-user-container"),
     arUserContainer: document.getElementById("ar-user-container"),
     arDayIndicator: document.getElementById("ar-day-indicator"),
@@ -112,6 +120,47 @@ function showMessage(msg, type = "error") {
 
 function createSlotKey(dateStr, timeSlot) {
     return `${dateStr}_${timeSlot}`.replace(/[.#$\[\]\/]/g, "-");
+}
+
+function getArOperatingSchedule(date = new Date()) {
+    const dateValue = date && typeof date.getTime === "function" ? date.getTime() : date;
+    const parsedDate = new Date(dateValue);
+    const targetDate = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+    const isWeekend = targetDate.getDay() === 0 || targetDate.getDay() === 6;
+    const slots = [];
+    const lastHour = isWeekend ? 17 : 20;
+
+    for (let hour = 10; hour <= lastHour; hour += 1) {
+        if (hour === 12) continue;
+        ["00", "30"].forEach((minute) => {
+            if (hour === lastHour && minute === "30") return;
+            const nextHour = minute === "30" ? hour + 1 : hour;
+            const nextMinute = minute === "30" ? "00" : "30";
+            slots.push({
+                time: `${String(hour).padStart(2, "0")}:${minute}`,
+                endTime: `${String(nextHour).padStart(2, "0")}:${nextMinute}`
+            });
+        });
+    }
+
+    return {
+        isWeekend,
+        label: isWeekend ? "주말 운영 (10:00~17:30)" : "평일 운영 (10:00~20:30)",
+        slots
+    };
+}
+
+function getArTimeMinutes(value) {
+    const match = typeof value === "string"
+        ? value.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/)
+        : null;
+    return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function normalizeArTimeSlot(value) {
+    const minutes = getArTimeMinutes(value);
+    if (minutes === null) return "";
+    return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
 function collectUsers(containerSelector) {

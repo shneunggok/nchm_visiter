@@ -46,6 +46,248 @@ const adminExportStates = {
     visit: { loading: false, requestVersion: 0, processed: 0 },
     ar: { loading: false, requestVersion: 0, processed: 0 }
 };
+let adminArTodayQuery = null;
+let adminArTodayDate = "";
+let adminArTodayRecords = [];
+let adminArTodayGroups = new Map();
+let adminArScheduleUiBound = false;
+let adminArDetailPreviousBodyOverflow = "";
+let adminArDetailReturnFocus = null;
+
+function compareArReservationTimes(first, second) {
+    const firstMinutes = getArTimeMinutes(first?.timeSlot);
+    const secondMinutes = getArTimeMinutes(second?.timeSlot);
+    if (firstMinutes === null && secondMinutes !== null) return 1;
+    if (firstMinutes !== null && secondMinutes === null) return -1;
+    if (firstMinutes !== secondMinutes) return (firstMinutes || 0) - (secondMinutes || 0);
+    const firstCreatedAt = Number(first?.createdAt) || 0;
+    const secondCreatedAt = Number(second?.createdAt) || 0;
+    if (firstCreatedAt !== secondCreatedAt) return firstCreatedAt - secondCreatedAt;
+    return String(first?._key || "").localeCompare(String(second?._key || ""));
+}
+
+function buildAdminArTodaySchedule(records, dateKey, now = new Date()) {
+    const schedule = getArOperatingSchedule(now);
+    const groups = new Map();
+    toArray(records).forEach((record) => {
+        if (!record || typeof record !== "object" || record.date !== dateKey) return;
+        const timeSlot = normalizeArTimeSlot(record.timeSlot);
+        if (!timeSlot) return;
+        if (!groups.has(timeSlot)) groups.set(timeSlot, []);
+        groups.get(timeSlot).push(record);
+    });
+    groups.forEach((logs) => logs.sort(compareArReservationTimes));
+
+    const operatingTimes = schedule.slots.map((slot) => slot.time);
+    const extraTimes = [...groups.keys()]
+        .filter((timeSlot) => !operatingTimes.includes(timeSlot))
+        .sort((first, second) => getArTimeMinutes(first) - getArTimeMinutes(second));
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    return operatingTimes.concat(extraTimes)
+        .sort((first, second) => getArTimeMinutes(first) - getArTimeMinutes(second))
+        .map((timeSlot) => {
+            const logs = groups.get(timeSlot) || [];
+            const users = logs.flatMap((log) =>
+                toArray(log.users).filter((user) => user && typeof user === "object")
+            );
+            const startMinutes = getArTimeMinutes(timeSlot);
+            let timeState = "upcoming";
+            if (startMinutes !== null && currentMinutes >= startMinutes + 30) {
+                timeState = "past";
+            } else if (startMinutes !== null && currentMinutes >= startMinutes) {
+                timeState = "current";
+            }
+            return {
+                timeSlot,
+                logs,
+                users,
+                representative: String(users[0]?.name || "").trim(),
+                isExtra: extraTimes.includes(timeSlot),
+                timeState
+            };
+        });
+}
+
+function formatAdminArTodayDate(dateKey) {
+    if (!isValidDateKey(dateKey)) return dateKey || "";
+    const [year, month, day] = dateKey.split("-");
+    return `${year}.${month}.${day}`;
+}
+
+function bindAdminArScheduleUi() {
+    if (adminArScheduleUiBound || typeof document === "undefined") return;
+    const grid = dom.adminArTodayGrid;
+    const modal = dom.adminArDetailModal;
+    if (!grid || !modal) return;
+    adminArScheduleUiBound = true;
+
+    grid.addEventListener("click", (event) => {
+        const button = event.target.closest?.("[data-admin-ar-time]");
+        if (!button) return;
+        openAdminArReservationDetail(button.dataset.adminArTime);
+    });
+    dom.adminArDetailClose?.addEventListener("click", closeAdminArReservationDetail);
+    dom.adminArDetailConfirm?.addEventListener("click", closeAdminArReservationDetail);
+    modal.addEventListener("click", (event) => {
+        if (event.target === modal) closeAdminArReservationDetail();
+    });
+    document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !modal.classList.contains("hidden")) {
+            event.preventDefault();
+            closeAdminArReservationDetail();
+        }
+    });
+}
+
+function openAdminArReservationDetail(timeSlot) {
+    const group = adminArTodayGroups.get(normalizeArTimeSlot(timeSlot));
+    const modal = dom.adminArDetailModal;
+    const content = dom.adminArDetailContent;
+    if (!group || !group.logs.length || !modal || !content) return;
+
+    const participantRows = group.users.map((user, index) =>
+        `<li><strong>${index + 1}. ${escapeHtml(user.name || "이름 없음")}</strong>` +
+        `<span>${escapeHtml(user.gender || "성별 미상")}</span></li>`
+    ).join("");
+    const duplicateNotice = group.logs.length > 1
+        ? `<p class="admin-ar-detail-warning">동일 시간에 ${group.logs.length}개의 예약 기록이 확인되었습니다.</p>`
+        : "";
+    content.innerHTML =
+        `<div class="admin-ar-detail-summary">` +
+        `<div><span>예약 날짜</span><strong>${escapeHtml(formatAdminArTodayDate(adminArTodayDate))}</strong></div>` +
+        `<div><span>예약 시간</span><strong>${escapeHtml(group.timeSlot)}</strong></div>` +
+        `<div><span>대표자</span><strong>${escapeHtml(group.representative || "이름 없음")}</strong></div>` +
+        `<div><span>총 인원</span><strong>${group.users.length}명</strong></div>` +
+        `</div>${duplicateNotice}` +
+        `<p class="admin-ar-detail-list-title">전체 이용자</p>` +
+        `<ol class="admin-ar-detail-list">${participantRows || "<li><strong>이용자 정보가 없습니다.</strong></li>"}</ol>`;
+
+    adminArDetailReturnFocus = document.activeElement;
+    adminArDetailPreviousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    dom.adminArDetailClose?.focus();
+}
+
+function closeAdminArReservationDetail() {
+    const modal = dom.adminArDetailModal;
+    if (!modal || modal.classList.contains("hidden")) return;
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
+    document.body.style.overflow = adminArDetailPreviousBodyOverflow;
+    adminArDetailPreviousBodyOverflow = "";
+    if (adminArDetailReturnFocus && typeof adminArDetailReturnFocus.focus === "function") {
+        adminArDetailReturnFocus.focus();
+    }
+    adminArDetailReturnFocus = null;
+}
+
+function renderAdminArTodaySchedule() {
+    const grid = dom.adminArTodayGrid;
+    if (!grid) return;
+    bindAdminArScheduleUi();
+    const now = new Date();
+    const dateKey = adminArTodayDate || formatLocalDate(now);
+    const groups = buildAdminArTodaySchedule(adminArTodayRecords, dateKey, now);
+    adminArTodayGroups = new Map(groups.map((group) => [group.timeSlot, group]));
+    const reservationCount = groups.reduce((sum, group) => sum + group.logs.length, 0);
+
+    if (dom.adminArTodayDate) {
+        dom.adminArTodayDate.textContent = `${formatAdminArTodayDate(dateKey)} · ${getArOperatingSchedule(now).label}`;
+    }
+    if (dom.adminArTodayCount) dom.adminArTodayCount.textContent = `${reservationCount}팀`;
+    grid.innerHTML = groups.map((group) => {
+        const stateClass = group.timeState === "current"
+            ? " is-current"
+            : group.timeState === "past" ? " is-past" : "";
+        const extraClass = group.isExtra ? " is-extra" : "";
+        if (!group.logs.length) {
+            return `<div class="admin-ar-slot-card${stateClass}${extraClass}">` +
+                `<span class="admin-ar-slot-time">${escapeHtml(group.timeSlot)}</span>` +
+                `<span class="admin-ar-slot-label">예약 없음</span>` +
+                `<span class="admin-ar-slot-meta">${group.timeState === "past" ? "지난 시간" : "예약 가능"}</span></div>`;
+        }
+        const duplicateLabel = group.logs.length > 1 ? ` · 기록 ${group.logs.length}건` : "";
+        return `<button type="button" class="admin-ar-slot-card is-reserved${stateClass}${extraClass}" ` +
+            `data-admin-ar-time="${escapeHtml(group.timeSlot)}">` +
+            `<span class="admin-ar-slot-time">${escapeHtml(group.timeSlot)}</span>` +
+            `<span class="admin-ar-slot-label">${escapeHtml(group.representative || "이름 없음")} · ${group.users.length}명</span>` +
+            `<span class="admin-ar-slot-meta">예약 상세 보기${duplicateLabel}</span></button>`;
+    }).join("");
+
+    if (dom.adminArTodayStatus) {
+        dom.adminArTodayStatus.dataset.state = "complete";
+        dom.adminArTodayStatus.textContent = reservationCount
+            ? "예약된 시간 카드를 누르면 전체 이용자 이름과 성별을 확인할 수 있습니다."
+            : "오늘 등록된 AR 예약이 없습니다.";
+    }
+}
+
+function detachAdminArTodayQuery() {
+    if (!adminArTodayQuery) return;
+    adminArTodayQuery.off();
+    adminArTodayQuery = null;
+}
+
+function subscribeAdminArTodaySchedule() {
+    if (typeof isAdminUser !== "undefined" && !isAdminUser) return false;
+    const today = formatLocalDate(new Date());
+    if (adminArTodayQuery && adminArTodayDate === today) return true;
+
+    detachAdminArTodayQuery();
+    adminArTodayDate = today;
+    adminArTodayRecords = [];
+    if (dom.adminArTodayStatus) {
+        dom.adminArTodayStatus.dataset.state = "loading";
+        dom.adminArTodayStatus.textContent = "오늘 예약을 불러오는 중입니다.";
+    }
+    const query = arLogsRef.orderByChild("date").equalTo(today).limitToLast(50);
+    adminArTodayQuery = query;
+    query.on("value", (snapshot) => {
+        if (adminArTodayQuery !== query) return;
+        const records = [];
+        snapshot.forEach((child) => {
+            const value = child.val();
+            if (value && typeof value === "object") {
+                records.push({ _key: child.key, ...value });
+            }
+        });
+        adminArTodayRecords = records.sort(compareArReservationTimes);
+        renderAdminArTodaySchedule();
+    }, (error) => {
+        if (adminArTodayQuery !== query) return;
+        logError("adminArTodayQuery.on", error);
+        adminArTodayQuery = null;
+        if (dom.adminArTodayStatus) {
+            dom.adminArTodayStatus.dataset.state = "error";
+            dom.adminArTodayStatus.textContent = "오늘 예약 시간표를 불러오지 못했습니다. 잠시 후 관리자 화면에 다시 들어와 주세요.";
+        }
+    });
+    return true;
+}
+
+function unsubscribeAdminArTodaySchedule() {
+    detachAdminArTodayQuery();
+    closeAdminArReservationDetail();
+    adminArTodayDate = "";
+    adminArTodayRecords = [];
+    adminArTodayGroups = new Map();
+    if (dom.adminArTodayGrid) {
+        dom.adminArTodayGrid.innerHTML = '<div class="admin-ar-today-loading">관리자 로그인 후 오늘 예약이 표시됩니다.</div>';
+    }
+}
+
+function refreshAdminArTodayScheduleDate() {
+    if (typeof isAdminUser === "undefined" || !isAdminUser) return false;
+    const today = formatLocalDate(new Date());
+    if (adminArTodayDate === today && adminArTodayQuery) {
+        renderAdminArTodaySchedule();
+        return true;
+    }
+    return subscribeAdminArTodaySchedule();
+}
 
 function createAdminStatsMatrix(categories) {
     const matrix = {};

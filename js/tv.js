@@ -83,6 +83,7 @@ let tvRuntimeMetrics = {
 let tvSubscribedDate = "";
 let tvEventsCache = null;
 let tvNoticesCache = null;
+let tvArReservationsCache = [];
 let tvPreviewDraft = null;
 let tvHadActiveEvents = false;
 let tvHadActiveNotices = false;
@@ -106,7 +107,7 @@ const TV_SUBSCRIPTION_READY_TIMEOUT_MS = 60000;
 const TV_CORE_SUBSCRIPTION_SOURCES = [
     "tvSettings",
     "visitLogs",
-    "arSlotLocks",
+    "arLogs",
     "attendanceEvents",
     "events",
     "notices"
@@ -137,6 +138,8 @@ function cacheTVDOM() {
     TV_DOM.attendanceVisitBoard = document.getElementById("tv-attendance-visit-board");
     TV_DOM.attendanceArBoard = document.getElementById("tv-attendance-ar-board");
     TV_DOM.arCount = document.getElementById("tv-ar-count");
+    TV_DOM.arDateLabel = document.getElementById("tv-ar-date-label");
+    TV_DOM.arReservationGrid = document.getElementById("tv-ar-reservation-grid");
     TV_DOM.eventsContainer = document.getElementById("tv-events-container");
     TV_DOM.noticesContainer = document.getElementById("tv-notices-container");
     TV_DOM.indicator = document.getElementById("tv-indicator");
@@ -321,6 +324,9 @@ function updateTVStatus(slideId) {
 
 function refreshSlideContent(slideId) {
     switch (slideId) {
+        case "ar":
+            renderTvArReservations(tvArReservationsCache, tvSubscribedDate || formatLocalDate(new Date()));
+            break;
         default:
             break;
     }
@@ -697,28 +703,141 @@ function subscribeTodayVisitors(generation) {
 
 // ==================== Firebase: AR Status ====================
 
+function tvArTimeMinutes(value) {
+    var match = typeof value === "string"
+        ? value.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/)
+        : null;
+    return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function normalizeTvArTimeSlot(value) {
+    var minutes = tvArTimeMinutes(value);
+    if (minutes === null) return "";
+    return String(Math.floor(minutes / 60)).padStart(2, "0") + ":" +
+        String(minutes % 60).padStart(2, "0");
+}
+
+function maskTvArReservationName(name) {
+    var value = String(name || "").trim();
+    if (!value) return "이용자";
+    if (value.length === 1) return "*";
+    if (value.length === 2) return value.charAt(0) + "*";
+    return value.charAt(0) + "*" + value.charAt(value.length - 1);
+}
+
+function tvArReservationUsers(record) {
+    var source = record && record.users;
+    var users = Array.isArray(source)
+        ? source
+        : source && typeof source === "object" ? Object.values(source) : [];
+    return users.filter(function(user) {
+        return user && typeof user === "object";
+    });
+}
+
+function normalizeTvArReservations(records, dateKey, now) {
+    var current = now || new Date();
+    var currentMinutes = current.getHours() * 60 + current.getMinutes();
+    return (Array.isArray(records) ? records : []).map(function(record) {
+        var timeSlot = normalizeTvArTimeSlot(record && record.timeSlot);
+        if (!record || record.date !== dateKey || !timeSlot) return null;
+        var users = tvArReservationUsers(record);
+        var startMinutes = tvArTimeMinutes(timeSlot);
+        var timeState = currentMinutes >= startMinutes + 30
+            ? "past"
+            : currentMinutes >= startMinutes ? "current" : "upcoming";
+        return {
+            _key: record._key || "",
+            timeSlot: timeSlot,
+            users: users,
+            createdAt: Number(record.createdAt) || 0,
+            timeState: timeState
+        };
+    }).filter(Boolean).sort(function(first, second) {
+        var timeDifference = tvArTimeMinutes(first.timeSlot) - tvArTimeMinutes(second.timeSlot);
+        if (timeDifference) return timeDifference;
+        if (first.createdAt !== second.createdAt) return first.createdAt - second.createdAt;
+        return String(first._key).localeCompare(String(second._key));
+    });
+}
+
+function renderTvArReservations(records, dateKey) {
+    var today = dateKey || formatLocalDate(new Date());
+    var reservations = normalizeTvArReservations(records, today, new Date());
+    if (TV_DOM.arCount) TV_DOM.arCount.textContent = reservations.length;
+    if (TV_DOM.arDateLabel) {
+        var dateParts = today.split("-");
+        TV_DOM.arDateLabel.textContent = dateParts.length === 3
+            ? dateParts[0] + "." + dateParts[1] + "." + dateParts[2] + " · 이용시간 순"
+            : today;
+    }
+
+    var grid = TV_DOM.arReservationGrid;
+    if (grid) {
+        grid.classList.toggle("is-dense", reservations.length > 12);
+        if (!reservations.length) {
+            grid.innerHTML = '<div class="tv-ar-reservation-empty"><span>AR</span>' +
+                '<strong>오늘 등록된 AR 예약이 없습니다</strong></div>';
+        } else {
+            grid.innerHTML = reservations.map(function(reservation, index) {
+                var maskedNames = reservation.users.map(function(user) {
+                    return maskTvArReservationName(user.name);
+                });
+                var representative = maskedNames[0] || "이용자";
+                var additionalNames = maskedNames.slice(1, 3).join(" · ");
+                if (maskedNames.length > 3) {
+                    additionalNames += (additionalNames ? " · " : "") + "외 " + (maskedNames.length - 3) + "명";
+                }
+                if (!additionalNames) additionalNames = "예약자 정보 보호 표시";
+                var stateClass = reservation.timeState === "current"
+                    ? " is-current"
+                    : reservation.timeState === "past" ? " is-past" : "";
+                return '<article class="tv-ar-reservation-card' + stateClass +
+                    '" style="animation-delay:' + Math.min(index * 45, 360) + 'ms">' +
+                    '<time class="tv-ar-reservation-time">' + escapeHtml(reservation.timeSlot) + '</time>' +
+                    '<div class="tv-ar-reservation-person"><strong>' + escapeHtml(representative) + '</strong>' +
+                    '<span>' + escapeHtml(additionalNames) + '</span></div>' +
+                    '<b class="tv-ar-reservation-count">' + reservation.users.length + '명</b></article>';
+            }).join("");
+        }
+    }
+
+    var message = document.getElementById("tv-ar-message");
+    if (message) {
+        message.textContent = reservations.length
+            ? "오늘 예약을 이용시간 순으로 표시합니다 · 이름 가운데 글자는 보호 처리됩니다."
+            : "오늘 등록된 AR 예약이 없습니다.";
+    }
+    return reservations;
+}
+
 function subscribeARStatus(generation) {
     generation = generation === undefined ? tvSubscriptionGeneration : generation;
     var todayStr = formatLocalDate(new Date());
     tvSubscribedDate = todayStr;
-    var query = arSlotLocksRef.orderByKey()
-        .startAt(todayStr + "_")
-        .endAt(todayStr + "_\uf8ff")
-        .limitToLast(50);
+    // 자정이 지난 뒤 이전 날짜 예약을 새 응답이 올 때까지 노출하지 않는다.
+    // 캐시는 유지하되 렌더 단계의 날짜 필터로 당일 화면만 즉시 갱신한다.
+    renderTvArReservations(tvArReservationsCache, todayStr);
+    var query = arLogsRef.orderByChild("date").equalTo(todayStr).limitToLast(50);
 
     if (arListener) arListener.off();
     arListener = query;
     arListener.on("value", function(snapshot) {
         if (!isTvSubscriptionGenerationCurrent(generation)) return;
-        var count = snapshot.numChildren();
-        if (TV_DOM.arCount) {
-            TV_DOM.arCount.textContent = count;
+        var records = [];
+        if (snapshot && typeof snapshot.forEach === "function") {
+            snapshot.forEach(function(child) {
+                var value = child.val();
+                if (value && typeof value === "object") {
+                    records.push(Object.assign({ _key: child.key }, value));
+                }
+            });
         }
-        var message = document.getElementById("tv-ar-message");
-        if (message) message.textContent = count ? "현재 예약된 AR 체험 팀입니다" : "현재 예약된 AR 체험 팀이 없습니다";
-        markTvRealtimeHealthy("arSlotLocks", generation);
+        tvArReservationsCache = records;
+        renderTvArReservations(tvArReservationsCache, todayStr);
+        markTvRealtimeHealthy("arLogs", generation);
     }, function(error) {
-        handleTvRealtimeSubscriptionError("arSlotLocks", error, generation);
+        handleTvRealtimeSubscriptionError("arLogs", error, generation);
     });
 }
 
@@ -1245,6 +1364,7 @@ document.addEventListener("visibilitychange", function() {
     resumeTvRecoveryFromEnvironment();
     updateClock();
     if (typeof refreshAttendanceDateState === "function") refreshAttendanceDateState();
+    renderTvArReservations(tvArReservationsCache, tvSubscribedDate || formatLocalDate(new Date()));
     renderEvents(tvEventsCache);
     renderNotices(tvNoticesCache);
 });

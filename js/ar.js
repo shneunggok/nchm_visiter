@@ -206,9 +206,15 @@ function subscribeArLogsToday() {
 
 function subscribeArLogsAll() {
     unsubscribeArLogsToday();
+    if (typeof subscribeAdminArTodaySchedule === "function") {
+        subscribeAdminArTodaySchedule();
+    }
     return loadAdminLogPage("ar", { reset: true });
 }
 
 function unsubscribeArLogsAll() {
     cancelAdminLogLoads("ar");
+    if (typeof unsubscribeAdminArTodaySchedule === "function") {
+        unsubscribeAdminArTodaySchedule();
+    }
 }

@@ -342,43 +342,208 @@ html, body {
 }
 
 /* ==================== AR Status Slide ==================== */
-.tv-ar-status-area {
-    display: flex;
-    gap: 40px;
-    justify-content: center;
-    flex-wrap: wrap;
+.tv-ar-schedule-content {
+    width: min(1520px, 94vw);
+    max-height: 94vh;
+    padding: clamp(30px, 4vw, 64px);
+    text-align: left;
 }
 
-.tv-ar-info-box {
+.tv-ar-schedule-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 32px;
+    margin-bottom: clamp(20px, 2.5vw, 34px);
+}
+
+.tv-ar-schedule-header .tv-section-title {
+    margin-bottom: 6px;
+    font-size: clamp(2.5rem, 4vw, 4.8rem);
+}
+
+.tv-ar-schedule-kicker {
+    margin-bottom: 8px;
+    color: var(--tv-accent);
+    font-size: clamp(.9rem, 1vw, 1.1rem);
+    font-weight: 900;
+    letter-spacing: .18em;
+}
+
+.tv-ar-date-label {
+    color: var(--tv-text-secondary);
+    font-size: clamp(1rem, 1.3vw, 1.35rem);
+    font-weight: 750;
+}
+
+.tv-ar-schedule-summary {
+    min-width: 176px;
+    display: grid;
+    grid-template-columns: auto auto auto;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+    padding: 15px 22px;
+    border: 1px solid var(--tv-card-border);
+    border-radius: 22px;
+    background: var(--tv-card-background);
+    box-shadow: 0 20px 46px rgba(2, 6, 23, .18);
+}
+
+.tv-ar-schedule-summary span {
+    color: var(--tv-text-secondary);
+    font-size: 1rem;
+    font-weight: 800;
+}
+
+.tv-ar-schedule-summary strong {
+    color: var(--tv-accent);
+    font-size: clamp(2.2rem, 3.5vw, 4rem);
+    font-weight: 950;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+
+.tv-ar-schedule-summary em {
+    color: var(--tv-text-primary);
+    font-size: 1rem;
+    font-style: normal;
+    font-weight: 850;
+}
+
+.tv-ar-reservation-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: clamp(10px, 1.2vw, 18px);
+}
+
+.tv-ar-reservation-card {
+    position: relative;
+    min-height: clamp(105px, 12vh, 142px);
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: clamp(12px, 1.4vw, 20px);
+    padding: clamp(16px, 1.8vw, 24px);
+    border: 1px solid var(--tv-card-border);
+    border-radius: 24px;
+    background: var(--tv-card-background);
+    box-shadow: 0 18px 38px rgba(2, 6, 23, .14);
+    animation: rankSlideIn .45s ease both;
+}
+
+.tv-ar-reservation-grid.is-dense .tv-ar-reservation-card {
+    min-height: 88px;
+    padding: 12px 16px;
+    border-radius: 18px;
+}
+
+.tv-ar-reservation-grid.is-dense .tv-ar-reservation-person span {
+    margin-top: 2px;
+}
+
+.tv-ar-reservation-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 5px;
+    background: linear-gradient(180deg, var(--tv-accent), var(--tv-accent-secondary));
+}
+
+.tv-ar-reservation-card.is-current {
+    border-color: var(--tv-accent);
+    box-shadow: 0 0 0 2px rgba(45, 212, 191, .24),
+        0 20px 50px rgba(2, 6, 23, .2);
+}
+
+.tv-ar-reservation-card.is-past {
+    opacity: .62;
+}
+
+.tv-ar-reservation-time {
+    color: var(--tv-accent);
+    font-size: clamp(1.5rem, 2.2vw, 2.5rem);
+    font-weight: 950;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.03em;
+}
+
+.tv-ar-reservation-person {
+    min-width: 0;
+}
+
+.tv-ar-reservation-person strong {
+    display: block;
+    overflow: hidden;
+    color: var(--tv-text-primary);
+    font-size: clamp(1.2rem, 1.65vw, 1.8rem);
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tv-ar-reservation-person span {
+    display: block;
+    margin-top: 5px;
+    overflow: hidden;
+    color: var(--tv-text-secondary);
+    font-size: clamp(.78rem, .95vw, 1rem);
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tv-ar-reservation-count {
+    min-width: 58px;
+    padding: 9px 11px;
+    border-radius: 16px;
+    background: rgba(45, 212, 191, .13);
+    color: var(--tv-accent);
+    font-size: clamp(1rem, 1.3vw, 1.4rem);
+    font-weight: 950;
+    text-align: center;
+}
+
+.tv-ar-reservation-empty {
+    grid-column: 1 / -1;
+    min-height: 330px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    background: var(--tv-card-background);
+    justify-content: center;
     border: 1px solid var(--tv-card-border);
     border-radius: 30px;
-    padding: clamp(36px, 4vw, 64px) clamp(60px, 7vw, 110px);
-    min-width: min(520px, 82vw);
-    box-shadow: 0 24px 70px rgba(2, 6, 23, .24);
-}
-
-.tv-ar-label {
-    font-size: clamp(1.25rem, 1.7vw, 1.8rem);
+    background: var(--tv-card-background);
     color: var(--tv-text-secondary);
-    font-weight: 600;
+    text-align: center;
 }
 
-.tv-ar-count {
-    font-size: clamp(6rem, 11vw, 11rem);
-    font-weight: 900;
+.tv-ar-reservation-empty span {
+    width: 82px;
+    height: 82px;
+    display: grid;
+    place-items: center;
+    margin-bottom: 20px;
+    border: 2px solid var(--tv-accent);
+    border-radius: 50%;
     color: var(--tv-accent);
-    line-height: 1;
+    font-size: 1.5rem;
+    font-weight: 950;
 }
 
-.tv-ar-unit {
-    font-size: clamp(1.5rem, 2vw, 2.2rem);
+.tv-ar-reservation-empty strong {
+    color: var(--tv-text-primary);
+    font-size: clamp(1.5rem, 2.2vw, 2.4rem);
+    font-weight: 900;
+}
+
+.tv-ar-schedule-message {
+    margin-top: clamp(16px, 2vw, 26px);
     color: var(--tv-text-secondary);
+    font-size: clamp(.9rem, 1.1vw, 1.15rem);
     font-weight: 700;
+    text-align: center;
 }
 
 /* ==================== Events Slide ==================== */
@@ -1356,8 +1521,8 @@ body:has(.tv-attendance-slide.active-slide) .tv-indicator {
     .tv-visitor-count { font-size: 5rem; }
     .tv-ranking-item { flex-wrap: wrap; gap: 12px; }
     .tv-ranking-item { max-width: 90%; }
-    .tv-ar-info-box { min-width: 180px; padding: 24px; }
-    .tv-ar-count { font-size: 3.5rem; }
+    .tv-ar-schedule-header { align-items: flex-start; }
+    .tv-ar-reservation-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .tv-attendance-board {
         padding: 34px 38px 82px;
     }

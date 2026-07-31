@@ -852,6 +852,7 @@ function renderTvArReservations(records, dateKey) {
                 }
                 if (slot.timeState === "current") secondaryText = "현재 이용 시간 · " + secondaryText;
                 if (slot.timeState === "past") secondaryText = "✓ 이용 완료 · " + secondaryText;
+                if (slot.timeState === "upcoming") secondaryText = "예약 확정 · " + secondaryText;
                 statusText = slot.users.length + "명";
             } else if (slot.timeState === "past") {
                 primaryText = "운영 종료";

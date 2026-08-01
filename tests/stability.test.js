@@ -2473,3 +2473,81 @@ test("Aroha Day replaces only the August 1 AR reservation screen and keeps a sav
     assert.match(markup, /assets\/events\/aroha-day-2026-08-01\.jpg/);
     assert.ok(fs.statSync(path.join(projectRoot, "assets/events/aroha-day-2026-08-01.jpg")).size > 100000);
 });
+
+test("August 1 visit completion stays open until its ten-second button unlocks", () => {
+    const classes = new Set(["hidden"]);
+    const modal = {
+        attributes: {},
+        classList: {
+            add(name) { classes.add(name); },
+            remove(name) { classes.delete(name); },
+            contains(name) { return classes.has(name); }
+        },
+        setAttribute(name, value) { this.attributes[name] = value; }
+    };
+    const button = { disabled: false, focusCalled: false, focus() { this.focusCalled = true; } };
+    const cover = { style: {}, offsetWidth: 100 };
+    const buttonText = { textContent: "" };
+    const count = { textContent: "" };
+    const time = { textContent: "" };
+    const elements = {
+        "visit-completion-modal": modal,
+        "visit-completion-count": count,
+        "visit-completion-time": time,
+        "visit-completion-button": button,
+        "visit-completion-button-cover": cover,
+        "visit-completion-button-text": buttonText
+    };
+    const stored = new Map();
+    const source = fs.readFileSync(path.join(projectRoot, "js/nchm.js"), "utf8");
+    const context = runScript("js/nchm.js", {
+        window: {
+            addEventListener() {},
+            setInterval,
+            clearInterval,
+            sessionStorage: {
+                setItem(key, value) { stored.set(key, value); },
+                getItem(key) { return stored.get(key) || null; },
+                removeItem(key) { stored.delete(key); }
+            }
+        },
+        document: {
+            addEventListener() {},
+            getElementById(id) { return elements[id] || null; },
+            querySelector() { return { focus() {} }; }
+        },
+        formatLocalDate(date) {
+            return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+                .map((part, index) => index ? String(part).padStart(2, "0") : String(part))
+                .join("-");
+        },
+        logError() {}
+    });
+    const completedAt = new Date(2026, 7, 1, 9, 5).getTime();
+
+    assert.equal(context.isTodayVisitCompletionEnabled(new Date(2026, 7, 1, 23, 59)), true);
+    assert.equal(context.isTodayVisitCompletionEnabled(new Date(2026, 7, 2, 0, 0)), false);
+    assert.equal(context.showTodayVisitCompletion(2, completedAt, Date.now() + 10000), true);
+    assert.equal(modal.classList.contains("hidden"), false);
+    assert.equal(modal.attributes["aria-hidden"], "false");
+    assert.equal(button.disabled, true);
+    assert.match(buttonText.textContent, /^완료 \(10초\)$/);
+    assert.equal(count.textContent, "오늘 방문 2명");
+    assert.equal(time.textContent, "09:05 등록");
+
+    context.closeTodayVisitCompletion();
+    assert.equal(modal.classList.contains("hidden"), false);
+    assert.ok(stored.size > 0);
+
+    assert.equal(context.showTodayVisitCompletion(2, completedAt, Date.now() - 1), true);
+    assert.equal(button.disabled, false);
+    assert.equal(buttonText.textContent, "완료 ✓");
+    context.closeTodayVisitCompletion();
+    assert.equal(modal.classList.contains("hidden"), true);
+    assert.equal(stored.size, 0);
+
+    assert.match(source, /if \(!showTodayVisitCompletion\(users\.length, Date\.now\(\)\)\)/);
+    const markup = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
+    assert.match(markup, /이 화면을 <strong>데스크 선생님에게<\/strong>/);
+    assert.match(markup, /완료 \(10초\)/);
+});

@@ -345,7 +345,28 @@
         </div>
     </div>
 
- 
+    <!-- TEMP-VISIT-COMPLETION-2026-08-01 START: 8월 1일 운영 종료 후 이 모달과 같은 이름의 CSS/JS 구간을 삭제하세요. -->
+    <div id="visit-completion-modal" class="visit-completion-modal hidden" role="dialog" aria-modal="true" aria-labelledby="visit-completion-title" aria-describedby="visit-completion-description" aria-hidden="true">
+        <div class="visit-completion-card">
+            <div class="visit-completion-check" aria-hidden="true">✓</div>
+            <span class="visit-completion-kicker">CHECK-IN COMPLETE</span>
+            <h2 id="visit-completion-title">출석 완료</h2>
+            <p id="visit-completion-description" class="visit-completion-guide">
+                이 화면을 <strong>데스크 선생님에게</strong><br>보여주세요.
+            </p>
+            <div class="visit-completion-summary">
+                <span id="visit-completion-count">오늘 방문 1명</span>
+                <span id="visit-completion-time">--:-- 등록</span>
+            </div>
+            <p class="visit-completion-wait">확인 후 아래 완료 버튼을 눌러주세요.</p>
+            <button id="visit-completion-button" type="button" class="visit-completion-button" onclick="closeTodayVisitCompletion()" disabled>
+                <span id="visit-completion-button-cover" class="visit-completion-button-cover" aria-hidden="true"></span>
+                <span id="visit-completion-button-text" class="visit-completion-button-text" aria-live="polite">완료 (10초)</span>
+            </button>
+        </div>
+    </div>
+    <!-- TEMP-VISIT-COMPLETION-2026-08-01 END -->
+
     <div id="password-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
         <div class="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl animate-fadeIn text-center">
             <h3 class="text-xl font-bold text-slate-800 mb-6">관리자 인증</h3>

@@ -14,6 +14,7 @@ let attendanceEventsState = {};
 let attendanceTickerResizeTimer = null;
 let currentAttendanceBannerType = "visit";
 let arNoticeTimer = null;
+let visitCompletionTimer = null;
 let dateRolloverTimer = null;
 let currentPageDate = "";
 let pageInitialized = false;
@@ -38,6 +39,117 @@ function updateArohaDayArReservationUi(date = new Date()) {
     return isPaused;
 }
 // TEMP-AROHA-DAY-2026-08-01 END
+
+// TEMP-VISIT-COMPLETION-2026-08-01 START: 8월 1일 운영 종료 후 이 구간과 호출부를 삭제하세요.
+const VISIT_COMPLETION_DATE = "2026-08-01";
+const VISIT_COMPLETION_DELAY_MS = 10000;
+const VISIT_COMPLETION_STORAGE_KEY = "nchm:visit-completion:2026-08-01";
+
+function isTodayVisitCompletionEnabled(date = new Date()) {
+    return formatLocalDate(date) === VISIT_COMPLETION_DATE;
+}
+
+function saveTodayVisitCompletionReceipt(receipt) {
+    try {
+        window.sessionStorage?.setItem(VISIT_COMPLETION_STORAGE_KEY, JSON.stringify(receipt));
+    } catch (error) {
+        logError("visit-completion-storage-save", error);
+    }
+}
+
+function removeTodayVisitCompletionReceipt() {
+    try {
+        window.sessionStorage?.removeItem(VISIT_COMPLETION_STORAGE_KEY);
+    } catch (error) {
+        logError("visit-completion-storage-remove", error);
+    }
+}
+
+function hideTodayVisitCompletion({ removeReceipt = true } = {}) {
+    window.clearInterval(visitCompletionTimer);
+    visitCompletionTimer = null;
+    const modal = document.getElementById("visit-completion-modal");
+    modal?.classList.add("hidden");
+    modal?.setAttribute("aria-hidden", "true");
+    if (removeReceipt) removeTodayVisitCompletionReceipt();
+}
+
+function showTodayVisitCompletion(personCount, completedAt = Date.now(), unlockAt = Date.now() + VISIT_COMPLETION_DELAY_MS) {
+    const completedDate = new Date(completedAt);
+    if (!isTodayVisitCompletionEnabled(completedDate)) return false;
+
+    const modal = document.getElementById("visit-completion-modal");
+    const count = document.getElementById("visit-completion-count");
+    const time = document.getElementById("visit-completion-time");
+    const button = document.getElementById("visit-completion-button");
+    const cover = document.getElementById("visit-completion-button-cover");
+    const buttonText = document.getElementById("visit-completion-button-text");
+    if (!modal || !count || !time || !button || !cover || !buttonText) return false;
+
+    const normalizedCount = Math.max(1, Math.min(10, Number(personCount) || 1));
+    const normalizedUnlockAt = Number(unlockAt) || (Date.now() + VISIT_COMPLETION_DELAY_MS);
+    saveTodayVisitCompletionReceipt({
+        date: VISIT_COMPLETION_DATE,
+        personCount: normalizedCount,
+        completedAt: completedDate.getTime(),
+        unlockAt: normalizedUnlockAt
+    });
+
+    count.textContent = `오늘 방문 ${normalizedCount}명`;
+    time.textContent = `${String(completedDate.getHours()).padStart(2, "0")}:${String(completedDate.getMinutes()).padStart(2, "0")} 등록`;
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    button.disabled = true;
+
+    const remainingMs = Math.max(0, normalizedUnlockAt - Date.now());
+    cover.style.transition = "none";
+    cover.style.width = `${Math.min(100, (remainingMs / VISIT_COMPLETION_DELAY_MS) * 100)}%`;
+    cover.offsetWidth;
+    cover.style.transition = `width ${remainingMs}ms linear`;
+    cover.style.width = "0%";
+
+    const updateCountdown = () => {
+        const remainingSeconds = Math.max(0, Math.ceil((normalizedUnlockAt - Date.now()) / 1000));
+        if (remainingSeconds > 0) {
+            buttonText.textContent = `완료 (${remainingSeconds}초)`;
+            return;
+        }
+        window.clearInterval(visitCompletionTimer);
+        visitCompletionTimer = null;
+        buttonText.textContent = "완료 ✓";
+        button.disabled = false;
+        button.focus();
+    };
+
+    window.clearInterval(visitCompletionTimer);
+    updateCountdown();
+    if (button.disabled) visitCompletionTimer = window.setInterval(updateCountdown, 250);
+    return true;
+}
+
+function restoreTodayVisitCompletion() {
+    if (!isTodayVisitCompletionEnabled()) {
+        hideTodayVisitCompletion();
+        return false;
+    }
+    try {
+        const receipt = JSON.parse(window.sessionStorage?.getItem(VISIT_COMPLETION_STORAGE_KEY) || "null");
+        if (!receipt || receipt.date !== VISIT_COMPLETION_DATE) return false;
+        return showTodayVisitCompletion(receipt.personCount, receipt.completedAt, receipt.unlockAt);
+    } catch (error) {
+        logError("visit-completion-storage-read", error);
+        removeTodayVisitCompletionReceipt();
+        return false;
+    }
+}
+
+function closeTodayVisitCompletion() {
+    const button = document.getElementById("visit-completion-button");
+    if (!button || button.disabled) return;
+    hideTodayVisitCompletion();
+    document.querySelector("#visit-user-container input")?.focus();
+}
+// TEMP-VISIT-COMPLETION-2026-08-01 END
 
 function getActiveAttendanceEvents(events, type) {
     const today = formatLocalDate(new Date());
@@ -621,7 +733,10 @@ function submitForm(type) {
         saveVisitLogs(logDataList)
             .then((request) => {
                 completePersistentRequest(request.requestId);
-                showMessage(`${users.length}명 방문 등록이 완료되었습니다! ✓`, "success");
+                // TEMP-VISIT-COMPLETION-2026-08-01: 오늘만 데스크 확인용 완료 화면을 유지합니다.
+                if (!showTodayVisitCompletion(users.length, Date.now())) {
+                    showMessage(`${users.length}명 방문 등록이 완료되었습니다! ✓`, "success");
+                }
                 dom.visitUserContainer.innerHTML = "";
                 document.querySelectorAll(".v-purpose").forEach((button) => button.classList.remove("active"));
                 visitCount = 0;
@@ -789,6 +904,8 @@ function initializePage() {
     });
     changeArCount(1);
     changeVisitCount(1);
+    // TEMP-VISIT-COMPLETION-2026-08-01: 완료 버튼을 누르기 전 새로고침해도 확인 화면을 복원합니다.
+    restoreTodayVisitCompletion();
     refreshIcons();
 
     const authLoading = document.getElementById("auth-loading");
@@ -845,6 +962,8 @@ function refreshDateSensitiveState() {
     dom.currentDate.innerText = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
     // TEMP-AROHA-DAY-2026-08-01: 자정 이후에는 예약 화면이 자동으로 다시 열립니다.
     updateArohaDayArReservationUi(now);
+    // TEMP-VISIT-COMPLETION-2026-08-01: 자정 이후에는 임시 완료 화면을 자동 해제합니다.
+    if (!isTodayVisitCompletionEnabled(now)) hideTodayVisitCompletion();
     if (!isAdminUser) {
         dom.startDate.value = nextDate;
         dom.endDate.value = nextDate;

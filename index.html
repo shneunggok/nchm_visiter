@@ -1,14 +1,11 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <!-- 문서 메타정보 설정 -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>시흥시능곡청소년문화의집 - 통합 서비스</title>
 
-    <!-- 외부 CDN 라이브러리 -->
     <script src="https://cdn.tailwindcss.com"></script> <!-- Tailwind CSS -->
-    <!-- [보안 수정] @latest 대신 버전을 고정하여 공급망(Supply-chain) 공격 표면을 줄임 -->
     <script src="https://unpkg.com/lucide@0.469.0"></script> <!-- 아이콘 라이브러리 -->
 
     <!-- 분리한 CSS 파일 연결 -->
@@ -23,39 +20,30 @@
             <p class="font-bold text-slate-700">로그인 상태를 확인하고 있습니다…</p>
         </div>
     </div>
-    <!-- 알림 메시지 박스 (숨겨진 상태로 시작) -->
+   
     <div id="custom-alert">정보를 모두 입력해 주세요!</div>
-
-    <!-- ==================== 상단 네비게이션 바 ==================== -->
+                             
     <nav class="navbar">
         <!-- 로고 -->
         <a href="#" class="logo-link">
             <img src="https://i.ibb.co/Dg5H6WL3/3.png" alt="시흥시능곡청소년문화의집" class="logo-img">
         </a>
+
         
-        <!-- 우측 버튼 영역 -->
         <div class="flex items-center space-x-3">
-            <!-- 현재 날짜 표시 -->
             <span class="bg-slate-50 border border-slate-200 text-slate-600 text-[12px] font-bold px-4 py-2 rounded-full" id="current-date"></span>
             
-            <!-- 관리자 진입 버튼 -->
             <button id="admin-entry-btn" onclick="openPasswordModal()" class="bg-slate-100 text-slate-500 p-2.5 rounded-xl hover:bg-slate-200 transition-colors">
                 <i data-lucide="settings" class="w-5 h-5"></i>
             </button>
-            <!--벌레좀잡아 버그버그 -->
-            <!-- 관리자 모드 종료 버튼 (숨겨진 상태) -->
             <button id="exit-admin-btn" onclick="exitAdmin()" class="hidden bg-red-100 text-red-600 p-2.5 rounded-xl hover:bg-red-200 transition-colors">
                 <i data-lucide="log-out" class="w-5 h-5"></i>
             </button>
         </div>
     </nav>
 
-    <!-- ==================== 메인 탭 메뉴 (일반 사용자 모드) ==================== -->
     <div id="main-tabs" class="bg-white border-b flex justify-around p-5 mb-6 sticky top-[80px] z-40">
-        <!-- 방문 등록 탭 -->
         <button onclick="switchTab('visit')" id="tab-visit" class="tab-btn active-visit font-bold">방문 등록</button>
-        
-        <!-- AR 예약 탭 -->
         <button onclick="switchTab('ar')" id="tab-ar" class="tab-btn font-bold">
             AR 예약
             <span id="ar-event-status-badge" class="attendance-tab-event-badge hidden">
@@ -65,25 +53,22 @@
         </button>
     </div>
 
-    <!-- ==================== 관리자 탭 메뉴 (관리자 모드에서만 표시) ==================== -->
+
     <div id="admin-tabs" class="hidden bg-white border-b flex justify-around p-5 mb-6 sticky top-[80px] z-40">
-        <!-- 방문 등록 내역 탭 -->
         <button onclick="switchAdminSubTab('visit-logs')" id="subtab-visit-logs" class="tab-btn active-visit font-bold">방문 등록 내역</button>
-        
-        <!-- AR 예약 현황 탭 -->
+
         <button onclick="switchAdminSubTab('ar-logs')" id="subtab-ar-logs" class="tab-btn font-bold">AR 예약 현황</button>
         <button onclick="switchAdminSubTab('tv-settings')" id="subtab-tv-settings" class="tab-btn font-bold">TV 관리</button>
     </div>
 
-    <!-- 방문 등록 이벤트 안내: 폼의 max-width 컨테이너와 분리된 전체 폭 영역 -->
+ 
     <div id="attendance-event-banner" class="attendance-event-banner hidden" aria-live="polite">
         <div id="attendance-event-banner-track" class="attendance-event-banner-track"></div>
     </div>
 
-    <!-- ==================== 메인 콘텐츠 컨테이너 ==================== -->
     <div class="max-w-xl mx-auto px-4" id="main-content-container">
         
-        <!-- ==================== 1. 방문 등록 섹션 ==================== -->
+
         <div id="section-visit" class="animate-fadeIn">
             <div class="gradient-banner rounded-t-[30px] p-8 sm:p-10 text-center text-white">
                 <h1 class="text-2xl sm:text-3xl font-black mb-4 leading-tight tracking-tight">시흥시능곡청소년문화의집<br>방문을 환영합니다 ✨</h1>
@@ -103,7 +88,7 @@
                 </div>
                 <div id="visit-user-container" class="space-y-4"></div>
 
-                <!-- 이용 목적 섹션 -->
+
                 <div class="bg-blue-50/50 rounded-3xl p-6 border border-blue-100">
                     <div class="text-center mb-5">
                         <h2 class="text-xl font-black text-blue-900">오늘 무엇을 하며 보낼까요?</h2>
@@ -145,7 +130,6 @@
             </div>
         </div>
 
-        <!-- 2. AR 예약 섹션 -->
         <div id="section-ar" class="hidden animate-fadeIn">
             <!-- TEMP-AROHA-DAY-2026-08-01 START: 행사 종료 후 이 블록과 같은 이름의 CSS/JS 구간 및 포스터 파일을 삭제하세요. -->
             <section id="aroha-day-ar-notice" class="aroha-day-ar-notice hidden" aria-labelledby="aroha-day-ar-title">
@@ -195,8 +179,7 @@
             </div>
             </div>
         </div>
-
-        <!-- 3. 관리자 대시보드 섹션 -->
+        
         <div id="section-admin" class="hidden animate-fadeIn space-y-10">
             <div class="bg-white p-6 rounded-[32px] border border-slate-200 card-shadow">
                 <div class="flex flex-wrap items-center justify-between gap-4">
@@ -257,7 +240,7 @@
                     조회 버튼을 누르면 선택 기간 전체 통계를 집계합니다.
                 </div>
             </div>
-
+            
             <div id="admin-visit-logs" class="space-y-6">
                 <div class="flex items-center gap-2 text-xl font-bold text-slate-800"><i data-lucide="bar-chart-3" class="w-6 h-6 text-blue-600"></i> 이용 목적 및 연령별 통계</div>
                 <div class="stats-container card-shadow"><div class="stats-table-wrapper"><table class="stats-table"><thead><tr><th rowspan="2" class="w-32">이용 목적</th><th colspan="2">초등(9~13)</th><th colspan="2">중등(14~16)</th><th colspan="2">고등(17~19)</th><th colspan="2">청년(20~24)</th><th colspan="2">청년(25~39)</th><th colspan="2">유아(~8)</th><th colspan="2">성인(40~)</th><th rowspan="2" class="sum-col">청소년 합계</th><th rowspan="2" class="sum-col">청년 합계</th><th rowspan="2" class="total-sum-col">전체 합계</th></tr><tr class="gender-header"><th class="male">남</th><th class="female">여</th><th class="male">남</th><th class="female">여</th><th class="male">남</th><th class="female">여</th><th class="male">남</th><th class="female">여</th><th class="male">남</th><th class="female">여</th><th class="male">남</th><th class="female">여</th><th class="male">남</th><th class="female">여</th></tr></thead><tbody id="visit-stats-body"></tbody><tfoot><tr class="footer-row" id="visit-stats-footer"></tr></tfoot></table></div></div>
@@ -294,7 +277,7 @@
                     <button id="visit-page-next" type="button" onclick="moveAdminLogPage('visit', 'next')" class="filter-chip disabled:opacity-40">다음</button>
                 </div>
             </div>
-
+              
             <div id="admin-ar-logs" class="hidden space-y-6">
                 <section id="admin-ar-today-panel" class="admin-ar-today-panel card-shadow" aria-labelledby="admin-ar-today-title">
                     <div class="admin-ar-today-header">
@@ -363,11 +346,10 @@
         </div>
     </div>
 
-    <!-- 비밀번호 모달 -->
+ 
     <div id="password-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
         <div class="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl animate-fadeIn text-center">
             <h3 class="text-xl font-bold text-slate-800 mb-6">관리자 인증</h3>
-            <!-- [보안 수정] maxlength="8" → "64": 비밀번호 길이를 인위적으로 제한하지 않도록 변경 (Authentication 강화) -->
             <input type="password" id="admin-password-input" maxlength="64" placeholder="••••" class="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-4 text-3xl text-center tracking-[1rem] focus:outline-none focus:border-slate-800 mb-6" onkeyup="if(event.key === 'Enter') verifyAdminPassword()">
             <div class="flex gap-3">
                 <button onclick="closePasswordModal()" class="flex-1 py-4 bg-slate-100 text-slate-500 font-bold rounded-2xl">취소</button>
@@ -376,7 +358,7 @@
         </div>
     </div>
 
-    <!-- AR 안내 팝업 -->
+    
 <div id="ar-notice-modal" class="hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm">
     <div class="bg-white w-full max-w-sm rounded-[32px] p-8 shadow-2xl animate-fadeIn text-center">
         <div class="text-5xl mb-4">📢</div>
@@ -399,7 +381,7 @@
     disabled
     class="relative overflow-hidden w-full py-4 bg-indigo-600 text-white font-black text-lg rounded-2xl cursor-not-allowed">
 
-    <!-- 흰색 막 -->
+  
     <div
         id="btnCover"
         class="absolute top-0 right-0 h-full bg-white/80"
@@ -414,11 +396,10 @@
         
     </div>
 </div>
-    <!-- Firebase SDK (Realtime Database) -->
+    
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-    <!-- 분리한 JavaScript 파일 연결 -->
     <script src="./js/config.js"></script>
     <script src="./js/firebase.js"></script>
     <script src="./js/utils.js"></script>

@@ -19,6 +19,26 @@ let currentPageDate = "";
 let pageInitialized = false;
 const pendingDeleteKeys = new Set();
 
+// TEMP-AROHA-DAY-2026-08-01 START: 행사 종료 후 이 구간과 호출부를 삭제하세요.
+const AROHA_DAY_AR_PAUSE_DATE = "2026-08-01";
+
+function isArohaDayArReservationPaused(date = new Date()) {
+    return formatLocalDate(date) === AROHA_DAY_AR_PAUSE_DATE;
+}
+
+function updateArohaDayArReservationUi(date = new Date()) {
+    const isPaused = isArohaDayArReservationPaused(date);
+    const notice = document.getElementById("aroha-day-ar-notice");
+    const reservationContent = document.getElementById("ar-reservation-content");
+    notice?.classList.toggle("hidden", !isPaused);
+    reservationContent?.classList.toggle("hidden", isPaused);
+    notice?.setAttribute("aria-hidden", String(!isPaused));
+    reservationContent?.setAttribute("aria-hidden", String(isPaused));
+    if (dom.sectionAr) dom.sectionAr.dataset.arohaDay = isPaused ? "active" : "inactive";
+    return isPaused;
+}
+// TEMP-AROHA-DAY-2026-08-01 END
+
 function getActiveAttendanceEvents(events, type) {
     const today = formatLocalDate(new Date());
     return toArray(events).filter((event) => event
@@ -168,8 +188,13 @@ function switchTab(type) {
         document.body.className = "pb-10 theme-ar";
         dom.sectionAr.classList.remove("hidden");
         document.getElementById("tab-ar").classList.add("active-ar");
-        generateTimeSlots();
-        showArNotice();
+        // TEMP-AROHA-DAY-2026-08-01: 행사 당일에는 안내만 표시하고 예약 단계로 진입하지 않습니다.
+        if (updateArohaDayArReservationUi(new Date())) {
+            closeArNotice();
+        } else {
+            generateTimeSlots();
+            showArNotice();
+        }
     }
     renderAttendanceEventBanner(attendanceEventsState);
 }
@@ -615,6 +640,12 @@ function submitForm(type) {
                 }
             });
     } else {
+        // TEMP-AROHA-DAY-2026-08-01: 숨겨진 버튼 호출 등 우회 요청도 당일에는 저장하지 않습니다.
+        if (isArohaDayArReservationPaused(now)) {
+            updateArohaDayArReservationUi(now);
+            showMessage("오늘은 아로하데이 행사 진행으로 AR 예약이 어렵습니다.", "info");
+            return;
+        }
         if (isSubmittingAr) return;
 
         const timeSlot = document.querySelector(".time-slot-btn.active")?.querySelector("span")?.innerText;
@@ -740,6 +771,8 @@ function initializePage() {
     dom.currentDate.innerText = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
     dom.startDate.value = formatLocalDate(now);
     dom.endDate.value = formatLocalDate(now);
+    // TEMP-AROHA-DAY-2026-08-01: 오늘만 예약 화면을 행사 안내로 교체합니다.
+    updateArohaDayArReservationUi(now);
 
     initFilterOptions();
     [dom.filterYearSelect, dom.filterMonthSelect, dom.startDate, dom.endDate].forEach((input) => {
@@ -810,6 +843,8 @@ function refreshDateSensitiveState() {
     if (currentPageDate === nextDate) return;
     currentPageDate = nextDate;
     dom.currentDate.innerText = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
+    // TEMP-AROHA-DAY-2026-08-01: 자정 이후에는 예약 화면이 자동으로 다시 열립니다.
+    updateArohaDayArReservationUi(now);
     if (!isAdminUser) {
         dom.startDate.value = nextDate;
         dom.endDate.value = nextDate;

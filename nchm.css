@@ -128,6 +128,94 @@ body.theme-ar { background-color: #f5f3ff; }
 .theme-ar .submit-btn { background-color: #6366f1; box-shadow: 0 8px 15px rgba(99, 102, 241, 0.3); }
 .theme-ar .check-badge { background-color: #fcd34d; color: #312e81; }
 
+/* TEMP-AROHA-DAY-2026-08-01 START: 행사 종료 후 이 구간을 삭제하세요. */
+.aroha-day-ar-notice {
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, .36);
+    border-radius: 30px;
+    padding: clamp(20px, 5vw, 34px);
+    background:
+        radial-gradient(circle at 92% 8%, rgba(255, 221, 96, .42), transparent 28%),
+        linear-gradient(155deg, #1838d6 0%, #2349e8 54%, #1732bb 100%);
+    box-shadow: 0 22px 54px rgba(30, 58, 138, .25);
+    color: #ffffff;
+    text-align: center;
+}
+
+.aroha-day-ar-copy {
+    margin: 0 auto 22px;
+}
+
+.aroha-day-ar-date {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 13px;
+    border-radius: 999px;
+    padding: 7px 13px;
+    background: #ffdf6b;
+    color: #172554;
+    font-size: 12px;
+    font-weight: 950;
+}
+
+.aroha-day-ar-copy h1 {
+    margin: 0;
+    font-size: clamp(1.6rem, 5vw, 2.15rem);
+    font-weight: 950;
+    letter-spacing: -.035em;
+    line-height: 1.25;
+}
+
+.aroha-day-ar-copy p {
+    margin-top: 13px;
+    color: rgba(255, 255, 255, .9);
+    font-size: clamp(.95rem, 3vw, 1.08rem);
+    font-weight: 750;
+    line-height: 1.65;
+}
+
+.aroha-day-poster-frame {
+    overflow: hidden;
+    margin: 0 auto;
+    border: 7px solid rgba(255, 255, 255, .94);
+    border-radius: 24px;
+    background: #ffffff;
+    box-shadow: 0 18px 42px rgba(2, 6, 23, .3);
+}
+
+.aroha-day-poster-frame img {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.aroha-day-return-button {
+    width: 100%;
+    margin-top: 22px;
+    border: 1px solid rgba(255, 255, 255, .55);
+    border-radius: 18px;
+    padding: 15px 18px;
+    background: #ffffff;
+    color: #1e3a8a;
+    font-size: 15px;
+    font-weight: 950;
+    box-shadow: 0 10px 25px rgba(15, 23, 42, .18);
+    cursor: pointer;
+    transition: transform .18s ease, box-shadow .18s ease;
+}
+
+.aroha-day-return-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 14px 30px rgba(15, 23, 42, .24);
+}
+
+.aroha-day-return-button:focus-visible {
+    outline: 4px solid rgba(255, 223, 107, .75);
+    outline-offset: 3px;
+}
+/* TEMP-AROHA-DAY-2026-08-01 END */
+
 /* 관리자 테마 - 회색(GRAY) 계열 */
 body.theme-admin { background-color: #f8fafc; }
 

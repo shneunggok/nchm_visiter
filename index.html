@@ -147,6 +147,26 @@
 
         <!-- 2. AR 예약 섹션 -->
         <div id="section-ar" class="hidden animate-fadeIn">
+            <!-- TEMP-AROHA-DAY-2026-08-01 START: 행사 종료 후 이 블록과 같은 이름의 CSS/JS 구간 및 포스터 파일을 삭제하세요. -->
+            <section id="aroha-day-ar-notice" class="aroha-day-ar-notice hidden" aria-labelledby="aroha-day-ar-title">
+                <div class="aroha-day-ar-copy">
+                    <span class="aroha-day-ar-date">2026. 8. 1. 토요일 · 오늘만</span>
+                    <h1 id="aroha-day-ar-title">오늘은 아로하데이가 진행됩니다!</h1>
+                    <p>행사 운영으로 오늘은 AR 예약이 어렵습니다.<br>AR 예약은 내일부터 다시 이용할 수 있습니다.</p>
+                    <p>감사합니다!</p>
+                </div>
+                <figure class="aroha-day-poster-frame">
+                    <img src="./assets/events/aroha-day-2026-08-01.jpg"
+                        width="989" height="1400" loading="lazy" decoding="async"
+                        alt="2026년 8월 1일 토요일 오후 1시부터 4시 30분까지 능곡청소년문화의집에서 진행되는 아로하데이 포스터">
+                </figure>
+                <button type="button" class="aroha-day-return-button" onclick="switchTab('visit')">
+                    방문 등록 화면으로 돌아가기
+                </button>
+            </section>
+            <!-- TEMP-AROHA-DAY-2026-08-01 END -->
+
+            <div id="ar-reservation-content">
             <div class="gradient-banner rounded-t-[30px] p-10 text-center text-white">
                 <h1 class="text-3xl font-bold mb-4 flex items-center justify-center gap-3">AR 예약하기 <i data-lucide="sparkles" class="w-8 h-8 text-yellow-300"></i></h1>
                 <div class="bg-white/20 backdrop-blur-sm inline-block px-6 py-2.5 rounded-xl border border-white/30 text-sm">AR 이용하기 전에 정보를 입력해주세요</div>
@@ -172,6 +192,7 @@
                     <div id="time-container" class="grid grid-cols-2 sm:grid-cols-3 gap-3"></div>
                 </div>
                 <button onclick="submitForm('ar')" class="submit-btn w-full text-white text-xl font-bold py-6 rounded-3xl">AR 예약 신청하기</button>
+            </div>
             </div>
         </div>
 

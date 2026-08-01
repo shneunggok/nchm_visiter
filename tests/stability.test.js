@@ -2419,3 +2419,57 @@ test("a failed aggregate query exits loading state and can be retried", async ()
     assert.equal(await context.reloadAdminStatistics(), true);
     assert.equal(context.getAdminPeriodAggregate("visit").recordCount, 1);
 });
+
+test("Aroha Day replaces only the August 1 AR reservation screen and keeps a save guard", () => {
+    const createToggleElement = (hidden) => {
+        const classes = new Set(hidden ? ["hidden"] : []);
+        return {
+            dataset: {},
+            attributes: {},
+            classList: {
+                toggle(name, force) {
+                    if (force) classes.add(name);
+                    else classes.delete(name);
+                },
+                contains(name) { return classes.has(name); }
+            },
+            setAttribute(name, value) { this.attributes[name] = value; }
+        };
+    };
+    const notice = createToggleElement(true);
+    const reservation = createToggleElement(false);
+    const sectionAr = createToggleElement(true);
+    const elements = {
+        "aroha-day-ar-notice": notice,
+        "ar-reservation-content": reservation
+    };
+    const source = fs.readFileSync(path.join(projectRoot, "js/nchm.js"), "utf8");
+    const context = runScript("js/nchm.js", {
+        window: { addEventListener() {} },
+        document: {
+            addEventListener() {},
+            getElementById(id) { return elements[id] || null; }
+        },
+        dom: { sectionAr },
+        formatLocalDate(date) {
+            return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
+                .map((part, index) => index ? String(part).padStart(2, "0") : String(part))
+                .join("-");
+        }
+    });
+
+    assert.equal(context.updateArohaDayArReservationUi(new Date(2026, 7, 1, 12)), true);
+    assert.equal(notice.classList.contains("hidden"), false);
+    assert.equal(reservation.classList.contains("hidden"), true);
+    assert.equal(sectionAr.dataset.arohaDay, "active");
+
+    assert.equal(context.updateArohaDayArReservationUi(new Date(2026, 7, 2, 0)), false);
+    assert.equal(notice.classList.contains("hidden"), true);
+    assert.equal(reservation.classList.contains("hidden"), false);
+    assert.equal(sectionAr.dataset.arohaDay, "inactive");
+    assert.match(source, /if \(isArohaDayArReservationPaused\(now\)\) \{/);
+
+    const markup = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
+    assert.match(markup, /assets\/events\/aroha-day-2026-08-01\.jpg/);
+    assert.ok(fs.statSync(path.join(projectRoot, "assets/events/aroha-day-2026-08-01.jpg")).size > 100000);
+});

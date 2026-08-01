@@ -22,20 +22,31 @@
 
         <!-- ==================== SLIDE: Welcome / Title Screen ==================== -->
         <div id="slide-welcome" class="tv-slide active-slide">
-            <div class="tv-slide-content">
-                <div class="tv-logo-area">
-                    <img src="https://i.ibb.co/Dg5H6WL3/3.png" alt="시흥시능곡청소년문화의집" class="tv-logo">
+            <div class="tv-slide-content tv-welcome-content">
+                <div class="tv-welcome-main">
+                    <div class="tv-logo-area">
+                        <img src="https://i.ibb.co/Dg5H6WL3/3.png" alt="시흥시능곡청소년문화의집" class="tv-logo">
+                    </div>
+                    <h1 class="tv-title">시흥시능곡청소년문화의집</h1>
+                    <p class="tv-subtitle">청소년의 꿈이 자라는 공간</p>
+                    <div class="tv-clock-area">
+                        <div id="tv-clock" class="tv-clock">--:--:--</div>
+                        <div id="tv-date-display" class="tv-date">----년 --월 --일 ---요일</div>
+                    </div>
+                    <div class="tv-status-bar">
+                        <span id="tv-connection-status" class="tv-status-dot status-connecting"></span>
+                        <span id="tv-status-text" class="tv-status-text">연결 중...</span>
+                    </div>
                 </div>
-                <h1 class="tv-title">시흥시능곡청소년문화의집</h1>
-                <p class="tv-subtitle">청소년의 꿈이 자라는 공간</p>
-                <div class="tv-clock-area">
-                    <div id="tv-clock" class="tv-clock">--:--:--</div>
-                    <div id="tv-date-display" class="tv-date">----년 --월 --일 ---요일</div>
-                </div>
-                <div class="tv-status-bar">
-                    <span id="tv-connection-status" class="tv-status-dot status-connecting"></span>
-                    <span id="tv-status-text" class="tv-status-text">연결 중...</span>
-                </div>
+                <aside class="tv-visit-qr-card" aria-label="방문등록 QR코드">
+                    <span class="tv-visit-qr-kicker">MOBILE CHECK-IN</span>
+                    <div class="tv-visit-qr-frame">
+                        <img src="./assets/qr/visit-registration.svg" alt="방문 등록 페이지로 이동하는 QR코드" class="tv-visit-qr-image" width="270" height="270">
+                    </div>
+                    <strong>방문등록 QR코드</strong>
+                    <p>휴대폰 카메라로<br>QR코드를 스캔해주세요</p>
+                    <span class="tv-visit-qr-url">shneunggok.github.io</span>
+                </aside>
             </div>
         </div>
 

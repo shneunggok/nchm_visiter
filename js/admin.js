@@ -7,6 +7,7 @@ let adminLoginUnlockTimer = null;
 let isAdminLoginPending = false;
 let adminExitPromise = null;
 let adminAuthTransitionInProgress = false;
+let adminRole = "admin";
 
 const ADMIN_LOGIN_MAX_ATTEMPTS = 5;
 const ADMIN_LOGIN_LOCK_MS = 60 * 1000;
@@ -18,9 +19,20 @@ function openPasswordModal() {
         return;
     }
     dom.passwordModal.classList.remove("hidden");
+    if (dom.adminEmailInput && !dom.adminEmailInput.value) {
+        dom.adminEmailInput.value = localStorage.getItem("nchm:last-admin-email") || ADMIN_EMAIL;
+    }
     dom.adminPasswordInput.value = "";
     dom.adminPasswordInput.focus();
     updateAdminLoginButtonState();
+}
+
+function getAdminAccessFromToken(user, tokenResult) {
+    const email = String(tokenResult?.claims?.email || user?.email || "").toLowerCase();
+    const isPrimary = email === ADMIN_EMAIL.toLowerCase();
+    const claimedAdmin = tokenResult?.claims?.admin === true;
+    const role = String(tokenResult?.claims?.adminRole || tokenResult?.claims?.role || "admin");
+    return { allowed: isPrimary || claimedAdmin, email, role: ["viewer", "editor", "admin"].includes(role) ? role : "admin" };
 }
 
 function closePasswordModal() {
@@ -51,27 +63,31 @@ async function verifyAdminPassword() {
         return;
     }
 
+    const email = String(dom.adminEmailInput?.value || "").trim().toLowerCase();
     const password = dom.adminPasswordInput.value;
-    if (!password) {
-        showMessage("비밀번호를 입력해 주세요.");
+    if (!email || !password) {
+        showMessage("관리자 이메일과 비밀번호를 입력해 주세요.");
         return;
     }
 
     isAdminLoginPending = true;
     dom.adminVerifyBtn.disabled = true;
     try {
-        const credential = await auth.signInWithEmailAndPassword(ADMIN_EMAIL, password);
+        const credential = await auth.signInWithEmailAndPassword(email, password);
         // Force the newly authenticated administrator token into the Firebase
         // client before opening admin-only tools such as TV settings.
         await credential.user.getIdToken(true);
         const tokenResult = await credential.user.getIdTokenResult();
-        if (String(tokenResult.claims.email || "").toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+        const access = getAdminAccessFromToken(credential.user, tokenResult);
+        if (!access.allowed) {
             await auth.signOut();
             showMessage("관리자 권한이 없는 계정입니다.");
             return;
         }
 
         isAdminUser = true;
+        adminRole = access.role;
+        localStorage.setItem("nchm:last-admin-email", access.email);
         adminLoginFailCount = 0;
         adminLoginLockedUntil = 0;
 
@@ -121,6 +137,11 @@ function enterAdminMode() {
         updateAttendanceEventBannerVisibility();
     }
     updateAdminDashboard();
+    if (typeof initializeAdminOperationsUi === "function") initializeAdminOperationsUi();
+    if (typeof subscribeArOperations === "function") subscribeArOperations();
+    if (typeof subscribeSpecialDaySettings === "function") subscribeSpecialDaySettings();
+    if (typeof reloadAdminStatistics === "function") reloadAdminStatistics();
+    if (typeof runPrivacyRetention === "function") runPrivacyRetention();
 }
 
 function isAdminAuthTransitioning() {
@@ -210,15 +231,27 @@ function initializeAdminActivityWatchers() {
     });
 }
 
-function restoreAdminSession(user) {
-    if (!user || user.isAnonymous || String(user.email || "").toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
-        return false;
-    }
+function activateRestoredAdminSession(access) {
     isAdminUser = true;
+    adminRole = access.role;
     subscribeVisitLogs();
     subscribeArLogsAll();
     enterAdminMode();
     initializeAdminActivityWatchers();
     resetAdminIdleTimeout();
     return true;
+}
+
+function restoreAdminSession(user) {
+    if (!user || user.isAnonymous) {
+        return false;
+    }
+    if (String(user.email || "").toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+        return activateRestoredAdminSession({ role: "admin" });
+    }
+    if (typeof user.getIdTokenResult !== "function") return false;
+    return user.getIdTokenResult().then((tokenResult) => {
+        const access = getAdminAccessFromToken(user, tokenResult);
+        return access.allowed ? activateRestoredAdminSession(access) : false;
+    });
 }

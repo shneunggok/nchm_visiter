@@ -4,9 +4,10 @@
  * 기존 기능은 그대로 유지하며 내부 모듈로 책임을 분리했습니다.
  */
 
-let currentFilter = "all";
+let currentFilter = "month";
 let isSubmittingVisit = false;
 let isSubmittingAr = false;
+const AR_MAX_PARTICIPANTS = 20;
 let visitCount = 0;
 let arCount = 0;
 let attendanceEventsQuery = null;
@@ -14,142 +15,11 @@ let attendanceEventsState = {};
 let attendanceTickerResizeTimer = null;
 let currentAttendanceBannerType = "visit";
 let arNoticeTimer = null;
-let visitCompletionTimer = null;
 let dateRolloverTimer = null;
 let currentPageDate = "";
 let pageInitialized = false;
+let arShowAllTimeSlots = false;
 const pendingDeleteKeys = new Set();
-
-// TEMP-AROHA-DAY-2026-08-01 START: 행사 종료 후 이 구간과 호출부를 삭제하세요.
-const AROHA_DAY_AR_PAUSE_DATE = "2026-08-01";
-
-function isArohaDayArReservationPaused(date = new Date()) {
-    return formatLocalDate(date) === AROHA_DAY_AR_PAUSE_DATE;
-}
-
-function updateArohaDayArReservationUi(date = new Date()) {
-    const isPaused = isArohaDayArReservationPaused(date);
-    const notice = document.getElementById("aroha-day-ar-notice");
-    const reservationContent = document.getElementById("ar-reservation-content");
-    notice?.classList.toggle("hidden", !isPaused);
-    reservationContent?.classList.toggle("hidden", isPaused);
-    notice?.setAttribute("aria-hidden", String(!isPaused));
-    reservationContent?.setAttribute("aria-hidden", String(isPaused));
-    if (dom.sectionAr) dom.sectionAr.dataset.arohaDay = isPaused ? "active" : "inactive";
-    return isPaused;
-}
-// TEMP-AROHA-DAY-2026-08-01 END
-
-// TEMP-VISIT-COMPLETION-2026-08-01 START: 8월 1일 운영 종료 후 이 구간과 호출부를 삭제하세요.
-const VISIT_COMPLETION_DATE = "2026-08-01";
-const VISIT_COMPLETION_DELAY_MS = 10000;
-const VISIT_COMPLETION_STORAGE_KEY = "nchm:visit-completion:2026-08-01";
-
-function isTodayVisitCompletionEnabled(date = new Date()) {
-    return formatLocalDate(date) === VISIT_COMPLETION_DATE;
-}
-
-function saveTodayVisitCompletionReceipt(receipt) {
-    try {
-        window.sessionStorage?.setItem(VISIT_COMPLETION_STORAGE_KEY, JSON.stringify(receipt));
-    } catch (error) {
-        logError("visit-completion-storage-save", error);
-    }
-}
-
-function removeTodayVisitCompletionReceipt() {
-    try {
-        window.sessionStorage?.removeItem(VISIT_COMPLETION_STORAGE_KEY);
-    } catch (error) {
-        logError("visit-completion-storage-remove", error);
-    }
-}
-
-function hideTodayVisitCompletion({ removeReceipt = true } = {}) {
-    window.clearInterval(visitCompletionTimer);
-    visitCompletionTimer = null;
-    const modal = document.getElementById("visit-completion-modal");
-    modal?.classList.add("hidden");
-    modal?.setAttribute("aria-hidden", "true");
-    if (removeReceipt) removeTodayVisitCompletionReceipt();
-}
-
-function showTodayVisitCompletion(personCount, completedAt = Date.now(), unlockAt = Date.now() + VISIT_COMPLETION_DELAY_MS) {
-    const completedDate = new Date(completedAt);
-    if (!isTodayVisitCompletionEnabled(completedDate)) return false;
-
-    const modal = document.getElementById("visit-completion-modal");
-    const count = document.getElementById("visit-completion-count");
-    const time = document.getElementById("visit-completion-time");
-    const button = document.getElementById("visit-completion-button");
-    const cover = document.getElementById("visit-completion-button-cover");
-    const buttonText = document.getElementById("visit-completion-button-text");
-    if (!modal || !count || !time || !button || !cover || !buttonText) return false;
-
-    const normalizedCount = Math.max(1, Math.min(10, Number(personCount) || 1));
-    const normalizedUnlockAt = Number(unlockAt) || (Date.now() + VISIT_COMPLETION_DELAY_MS);
-    saveTodayVisitCompletionReceipt({
-        date: VISIT_COMPLETION_DATE,
-        personCount: normalizedCount,
-        completedAt: completedDate.getTime(),
-        unlockAt: normalizedUnlockAt
-    });
-
-    count.textContent = `오늘 방문 ${normalizedCount}명`;
-    time.textContent = `${String(completedDate.getHours()).padStart(2, "0")}:${String(completedDate.getMinutes()).padStart(2, "0")} 등록`;
-    modal.classList.remove("hidden");
-    modal.setAttribute("aria-hidden", "false");
-    button.disabled = true;
-
-    const remainingMs = Math.max(0, normalizedUnlockAt - Date.now());
-    cover.style.transition = "none";
-    cover.style.width = `${Math.min(100, (remainingMs / VISIT_COMPLETION_DELAY_MS) * 100)}%`;
-    cover.offsetWidth;
-    cover.style.transition = `width ${remainingMs}ms linear`;
-    cover.style.width = "0%";
-
-    const updateCountdown = () => {
-        const remainingSeconds = Math.max(0, Math.ceil((normalizedUnlockAt - Date.now()) / 1000));
-        if (remainingSeconds > 0) {
-            buttonText.textContent = `완료 (${remainingSeconds}초)`;
-            return;
-        }
-        window.clearInterval(visitCompletionTimer);
-        visitCompletionTimer = null;
-        buttonText.textContent = "완료 ✓";
-        button.disabled = false;
-        button.focus();
-    };
-
-    window.clearInterval(visitCompletionTimer);
-    updateCountdown();
-    if (button.disabled) visitCompletionTimer = window.setInterval(updateCountdown, 250);
-    return true;
-}
-
-function restoreTodayVisitCompletion() {
-    if (!isTodayVisitCompletionEnabled()) {
-        hideTodayVisitCompletion();
-        return false;
-    }
-    try {
-        const receipt = JSON.parse(window.sessionStorage?.getItem(VISIT_COMPLETION_STORAGE_KEY) || "null");
-        if (!receipt || receipt.date !== VISIT_COMPLETION_DATE) return false;
-        return showTodayVisitCompletion(receipt.personCount, receipt.completedAt, receipt.unlockAt);
-    } catch (error) {
-        logError("visit-completion-storage-read", error);
-        removeTodayVisitCompletionReceipt();
-        return false;
-    }
-}
-
-function closeTodayVisitCompletion() {
-    const button = document.getElementById("visit-completion-button");
-    if (!button || button.disabled) return;
-    hideTodayVisitCompletion();
-    document.querySelector("#visit-user-container input")?.focus();
-}
-// TEMP-VISIT-COMPLETION-2026-08-01 END
 
 function getActiveAttendanceEvents(events, type) {
     const today = formatLocalDate(new Date());
@@ -193,7 +63,10 @@ function renderAttendanceEventBanner(events) {
     // without a jump or an empty interval.
     const estimatedCharacterWidth = window.innerWidth <= 640 ? 8 : 9;
     const minimumGroupCharacters = Math.ceil((window.innerWidth * 1.35) / estimatedCharacterWidth);
-    const repeatCount = Math.max(1, Math.ceil(minimumGroupCharacters / Math.max(message.length, 1)));
+    const prefersReducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
+    const repeatCount = prefersReducedMotion
+        ? 1
+        : Math.max(1, Math.ceil(minimumGroupCharacters / Math.max(message.length, 1)));
     const tickerGap = "\u00A0".repeat(12);
     const repeatedMessage = Array(repeatCount).fill(message).join(tickerGap);
     const durationSeconds = Math.max(16, Math.min(55, repeatedMessage.length * 0.18));
@@ -234,54 +107,46 @@ function subscribeAttendanceEventBanner() {
     attendanceEventsQuery.on("value", (snapshot) => renderAttendanceEventBanner(snapshot.val()), (error) => logError("attendance-events-banner", error));
 }
 
+function confirmAdminLogDeletion(type, log) {
+    const isAr = type === "ar";
+    const firstArUser = isAr ? toArray(log?.users)[0] : null;
+    const targetName = (isAr ? firstArUser?.name : log?.name) || "이름 확인 불가";
+    const targetDate = log?.date || "날짜 확인 불가";
+    const targetTime = isAr ? log?.timeSlot : log?.time;
+    const timeLine = targetTime ? `\n시간: ${targetTime}` : "";
+    const recordLabel = isAr ? "AR 예약" : "방문 기록";
+    return window.confirm(
+        `${recordLabel}을 삭제하시겠습니까?\n\n이름: ${targetName}\n날짜: ${targetDate}${timeLine}\n\n삭제한 기록은 되돌릴 수 없습니다.`
+    );
+}
+
 function deleteVisitLog(key) {
-    const pendingKey = `visit:${key}`;
-    if (!key || pendingDeleteKeys.has(pendingKey)) return;
-    pendingDeleteKeys.add(pendingKey);
+    if (typeof moveAdminRecordToTrash === "function") return moveAdminRecordToTrash("visit", key);
     const log = visitLogs.find((item) => item._key === key);
+    if (!key || !confirmAdminLogDeletion("visit", log)) return false;
     const updates = { [`visitLogs/${key}`]: null };
-    if (log && log.requestId) updates[`requestClaims/${log.requestId}`] = null;
-    db.ref().update(updates)
-        .then(() => {
-            invalidateAdminStatsCache("visit");
-            invalidateAdminLegacyVisitCache();
-            showMessage("삭제되었습니다.", "info");
-            return Promise.all([
-                loadAdminLogPage("visit"),
-                reloadAdminStatistics({ forceTypes: ["visit"] })
-            ]);
-        })
-        .catch((err) => {
-            logError("deleteVisitLog", err);
-            showMessage("삭제 중 오류가 발생했습니다.");
-        })
-        .finally(() => pendingDeleteKeys.delete(pendingKey));
+    if (log?.requestId) updates[`requestClaims/${log.requestId}`] = null;
+    return db.ref().update(updates).then(() => {
+        invalidateAdminStatsCache("visit");
+        invalidateAdminLegacyVisitCache();
+        showMessage("방문 기록이 삭제되었습니다.", "success");
+        return Promise.all([loadAdminLogPage("visit"), reloadAdminStatistics({ forceTypes: ["visit"] })]);
+    });
 }
 
 function deleteArLog(key) {
-    const pendingKey = `ar:${key}`;
-    if (!key || pendingDeleteKeys.has(pendingKey)) return;
-    pendingDeleteKeys.add(pendingKey);
-    const log = arLogs.find((l) => l._key === key);
-    const slotKey = log && (log.slotKey || (log.date && log.timeSlot ? createSlotKey(log.date, log.timeSlot) : ""));
+    if (typeof moveAdminRecordToTrash === "function") return moveAdminRecordToTrash("ar", key);
+    const log = arLogs.find((item) => item._key === key);
+    if (!key || !confirmAdminLogDeletion("ar", log)) return false;
+    const slotKey = log && (log.slotKey || createSlotKey(log.date, log.timeSlot));
     const updates = { [`arLogs/${key}`]: null };
     if (slotKey) updates[`arSlotLocks/${slotKey}`] = null;
-    if (log && log.requestId) updates[`requestClaims/${log.requestId}`] = null;
-
-    db.ref().update(updates)
-        .then(() => {
-            invalidateAdminStatsCache("ar");
-            showMessage("삭제되었습니다.", "info");
-            return Promise.all([
-                loadAdminLogPage("ar"),
-                reloadAdminStatistics({ forceTypes: ["ar"] })
-            ]);
-        })
-        .catch((err) => {
-            logError("deleteArLog", err);
-            showMessage("삭제 중 오류가 발생했습니다.");
-        })
-        .finally(() => pendingDeleteKeys.delete(pendingKey));
+    if (log?.requestId) updates[`requestClaims/${log.requestId}`] = null;
+    return db.ref().update(updates).then(() => {
+        invalidateAdminStatsCache("ar");
+        showMessage("AR 예약이 삭제되었습니다.", "success");
+        return Promise.all([loadAdminLogPage("ar"), reloadAdminStatistics({ forceTypes: ["ar"] })]);
+    });
 }
 
 function switchTab(type) {
@@ -300,8 +165,7 @@ function switchTab(type) {
         document.body.className = "pb-10 theme-ar";
         dom.sectionAr.classList.remove("hidden");
         document.getElementById("tab-ar").classList.add("active-ar");
-        // TEMP-AROHA-DAY-2026-08-01: 행사 당일에는 안내만 표시하고 예약 단계로 진입하지 않습니다.
-        if (updateArohaDayArReservationUi(new Date())) {
+        if (typeof updateSpecialDayPublicUi === "function" && updateSpecialDayPublicUi(new Date())) {
             closeArNotice();
         } else {
             generateTimeSlots();
@@ -314,9 +178,12 @@ function switchTab(type) {
 function switchAdminSubTab(tab) {
     dom.adminVisitLogs.classList.add("hidden");
     dom.adminArLogs.classList.add("hidden");
+    dom.adminOperations?.classList.add("hidden");
     document.getElementById("admin-tv-settings").classList.add("hidden");
+    document.getElementById("admin-statistics-panel")?.classList.toggle("hidden", !["visit-logs", "ar-logs"].includes(tab));
     document.getElementById("subtab-visit-logs").classList.remove("active-visit");
     document.getElementById("subtab-ar-logs").classList.remove("active-ar");
+    document.getElementById("subtab-operations")?.classList.remove("active-ar");
     document.getElementById("subtab-tv-settings").classList.remove("active-ar");
 
     if (tab === "visit-logs") {
@@ -325,6 +192,14 @@ function switchAdminSubTab(tab) {
     } else if (tab === "ar-logs") {
         dom.adminArLogs.classList.remove("hidden");
         document.getElementById("subtab-ar-logs").classList.add("active-ar");
+    } else if (tab === "operations") {
+        dom.adminOperations?.classList.remove("hidden");
+        document.getElementById("subtab-operations")?.classList.add("active-ar");
+        initializeAdminOperationsUi();
+        loadAdminTrash();
+        loadAdminAuditLog();
+        loadAdminArOperations();
+        if (typeof loadAdminSpecialDaySettings === "function") loadAdminSpecialDaySettings();
     } else {
         document.getElementById("admin-tv-settings").classList.remove("hidden");
         document.getElementById("subtab-tv-settings").classList.add("active-ar");
@@ -384,9 +259,34 @@ function closeArNotice() {
     dom.arNoticeModal.classList.add("hidden");
 }
 
+function updateArCountButtons() {
+    if (dom.arCountMinus) {
+        const isMinimum = arCount <= 1;
+        dom.arCountMinus.disabled = isMinimum;
+        dom.arCountMinus.setAttribute("aria-disabled", String(isMinimum));
+        dom.arCountMinus.classList.toggle("opacity-40", isMinimum);
+        dom.arCountMinus.classList.toggle("cursor-not-allowed", isMinimum);
+    }
+    if (dom.arCountPlus) {
+        const isMaximum = arCount >= AR_MAX_PARTICIPANTS;
+        dom.arCountPlus.disabled = isMaximum;
+        dom.arCountPlus.setAttribute("aria-disabled", String(isMaximum));
+        dom.arCountPlus.classList.toggle("opacity-40", isMaximum);
+        dom.arCountPlus.classList.toggle("cursor-not-allowed", isMaximum);
+    }
+}
+
 function changeArCount(delta) {
     const newCount = arCount + delta;
-    if (newCount < 1) return;
+    if (newCount < 1) {
+        updateArCountButtons();
+        return false;
+    }
+    if (newCount > AR_MAX_PARTICIPANTS) {
+        updateArCountButtons();
+        showMessage(`AR 예약은 최대 ${AR_MAX_PARTICIPANTS}명까지 등록할 수 있습니다.`, "info");
+        return false;
+    }
 
     const container = dom.arUserContainer;
 
@@ -419,6 +319,8 @@ function changeArCount(delta) {
 
     arCount = newCount;
     dom.arCountDisplay.innerText = arCount;
+    updateArCountButtons();
+    return true;
 }
 
 function selectGender(btn) {
@@ -429,9 +331,10 @@ function selectGender(btn) {
     btn.className = "flex-1 py-2.5 bg-white rounded-xl text-sm font-bold shadow-sm";
 }
 
-function addTimeBtn(container, h, m, reservedSlots) {
+function addTimeBtn(container, h, m, reservedSlots, now = new Date()) {
     const timeStr = `${h.toString().padStart(2, "0")}:${m}`;
     const isReserved = reservedSlots.includes(timeStr);
+    const isPast = isArSlotPast(timeStr, now);
     const endH = m === "30" ? h + 1 : h;
     const endM = m === "30" ? "00" : "30";
     const endTimeStr = `${endH.toString().padStart(2, "0")}:${endM}`;
@@ -439,9 +342,13 @@ function addTimeBtn(container, h, m, reservedSlots) {
     
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = `time-slot-btn choice-btn p-4 rounded-2xl flex flex-col items-center ${isReserved ? "disabled" : ""}`;
+    btn.disabled = isReserved || isPast;
+    btn.setAttribute("aria-disabled", String(btn.disabled));
+    btn.className = `time-slot-btn choice-btn p-4 rounded-2xl flex flex-col items-center ${btn.disabled ? "disabled" : ""}`;
 
-    if (isReserved) {
+    if (isPast) {
+        btn.innerHTML = `<span class="text-lg font-black">${timeStr}</span><span class="text-[10px] text-slate-400 font-bold">지난 시간</span>`;
+    } else if (isReserved) {
         btn.innerHTML = `<span class="text-lg font-black">${timeStr}</span><span class="text-[10px] text-red-500 font-bold">예약 완료</span>`;
     } else {
         btn.innerHTML = `
@@ -455,9 +362,8 @@ function addTimeBtn(container, h, m, reservedSlots) {
     container.appendChild(btn);
 }
 
-function generateTimeSlots() {
+function generateTimeSlots(now = new Date()) {
     dom.timeContainer.innerHTML = "";
-    const now = new Date();
     const schedule = getArOperatingSchedule(now);
     const todayStr = formatLocalDate(now);
     const reservedSlots = arLogsToday
@@ -472,12 +378,36 @@ function generateTimeSlots() {
         dom.arDayIndicator.className = "mb-4 inline-block px-4 py-1.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700";
     }
 
-    schedule.slots.forEach((slot) => {
+    const availableOnly = dom.arAvailableOnly?.checked === true;
+    const filteredSlots = schedule.slots.filter((slot) => !availableOnly || (!reservedSlots.includes(slot.time) && !isArSlotPast(slot.time, now)));
+    const compactMobile = window.innerWidth <= 640 && !arShowAllTimeSlots;
+    const visibleSlots = compactMobile ? filteredSlots.slice(0, 8) : filteredSlots;
+
+    visibleSlots.forEach((slot) => {
         const [hour, minute] = slot.time.split(":");
-        addTimeBtn(dom.timeContainer, Number(hour), minute, reservedSlots);
+        addTimeBtn(dom.timeContainer, Number(hour), minute, reservedSlots, now);
     });
 
+    if (!visibleSlots.length) {
+        dom.timeContainer.innerHTML = `<div class="col-span-full rounded-2xl border border-amber-200 bg-amber-50 p-5 text-center text-sm font-bold text-amber-800">${escapeHtml(schedule.isClosed ? "오늘은 휴관일이라 AR 예약을 받지 않습니다." : "현재 예약 가능한 시간대가 없습니다.")}</div>`;
+    }
+    if (dom.arSlotMoreButton) {
+        const hiddenCount = filteredSlots.length - visibleSlots.length;
+        dom.arSlotMoreButton.classList.toggle("hidden", hiddenCount <= 0);
+        dom.arSlotMoreButton.textContent = hiddenCount > 0 ? `전체 시간 보기 · ${hiddenCount}개 더 있음` : "전체 시간 보기";
+    }
+
     refreshIcons();
+}
+
+function resetAndGenerateArSlots() {
+    arShowAllTimeSlots = false;
+    generateTimeSlots();
+}
+
+function showAllArTimeSlots() {
+    arShowAllTimeSlots = true;
+    generateTimeSlots();
 }
 
 function setFilter(type) {
@@ -595,6 +525,16 @@ function renderStatsTable(data, categories, targetBodyId, targetFooterId, themeC
     footer.innerHTML += `<td>${footerYouth}</td><td>${footerYoung}</td><td class="${finalClass}">${grandTotal}</td>`;
 }
 
+function renderAdminSummaryChart(targetId, items) {
+    const target = document.getElementById(targetId);
+    if (!target) return;
+    const max = Math.max(1, ...items.map((item) => Number(item.value) || 0));
+    target.innerHTML = items.map((item) => {
+        const value = Number(item.value) || 0;
+        return `<div class="admin-chart-row"><span>${escapeHtml(item.label)}</span><div class="admin-chart-track"><div class="admin-chart-fill" style="width:${Math.max(value ? 3 : 0, (value / max) * 100)}%"></div></div><strong class="admin-chart-value">${value.toLocaleString("ko-KR")}</strong></div>`;
+    }).join("");
+}
+
 function updateAdminDashboard() {
     if (!dom.visitLogBody || !dom.arLogBody) {
         return;
@@ -608,6 +548,10 @@ function updateAdminDashboard() {
     const vStats = periodVisit.purposeStats;
 
     renderStatsTable(vStats, mainCategories, "visit-stats-body", "visit-stats-footer", "sum-col");
+    renderAdminSummaryChart("visit-stats-chart", mainCategories.map((category) => ({
+        label: category,
+        value: AGE_GROUPS.reduce((sum, age) => sum + (vStats[category]?.[age]?.남 || 0) + (vStats[category]?.[age]?.여 || 0), 0)
+    })));
 
     const studyStats = periodVisit.studyStats;
 
@@ -616,6 +560,10 @@ function updateAdminDashboard() {
     const arStats = periodAr.arStats;
 
     renderStatsTable(arStats, ["AR 이용"], "ar-stats-body", "ar-stats-footer", "ar-sum-col");
+    renderAdminSummaryChart("ar-stats-chart", AGE_GROUPS.map((age) => ({
+        label: age.split("(")[0],
+        value: (arStats["AR 이용"]?.[age]?.남 || 0) + (arStats["AR 이용"]?.[age]?.여 || 0)
+    })));
 
     dom.visitLogBody.innerHTML = "";
     filteredVisitLogs.forEach((log) => {
@@ -638,6 +586,10 @@ function updateAdminDashboard() {
                 </div>
             </td>
             <td>
+                <button onclick="openAdminRecordModal('visit','${escapeHtml(log._key)}')"
+                    class="bg-slate-700 text-white px-2 py-1 rounded text-xs mr-1">
+                    수정
+                </button>
                 <button onclick="deleteVisitLog('${escapeHtml(log._key)}')"
                     class="bg-red-500 text-white px-2 py-1 rounded text-xs">
                     삭제
@@ -656,6 +608,7 @@ function updateAdminDashboard() {
         tr.className = "border-b hover:bg-indigo-50/30";
 
         const users = toArray(log.users);
+        const statusLabels = { reserved: "예약", arrived: "도착", in_use: "이용 중", completed: "이용 완료", no_show: "노쇼", cancelled: "취소" };
         const details = users
             .filter((user) => user && typeof user === "object")
             .map((user) =>
@@ -673,8 +626,13 @@ function updateAdminDashboard() {
             <td class="py-3 text-indigo-600 font-bold">${escapeHtml(log.timeSlot)}</td>
             <td class="font-bold">${escapeHtml(users[0]?.name || "")}</td>
             <td>${users.length}명</td>
+            <td><span class="bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg text-[11px] font-bold">${escapeHtml(statusLabels[log.status] || "예약")}</span></td>
             <td class="text-xs text-left px-4 py-2">${details}</td>
             <td>
+                <button onclick="openAdminRecordModal('ar','${escapeHtml(log._key)}')"
+                    class="bg-slate-700 text-white px-2 py-1 rounded text-xs mr-1">
+                    수정
+                </button>
                 <button onclick="deleteArLog('${escapeHtml(log._key)}')"
                     class="bg-red-500 text-white px-2 py-1 rounded text-xs">
                     삭제
@@ -733,8 +691,7 @@ function submitForm(type) {
         saveVisitLogs(logDataList)
             .then((request) => {
                 completePersistentRequest(request.requestId);
-                // TEMP-VISIT-COMPLETION-2026-08-01: 오늘만 데스크 확인용 완료 화면을 유지합니다.
-                if (!showTodayVisitCompletion(users.length, Date.now())) {
+                if (typeof showSpecialVisitCompletion !== "function" || !showSpecialVisitCompletion(users.length, Date.now())) {
                     showMessage(`${users.length}명 방문 등록이 완료되었습니다! ✓`, "success");
                 }
                 dom.visitUserContainer.innerHTML = "";
@@ -755,10 +712,9 @@ function submitForm(type) {
                 }
             });
     } else {
-        // TEMP-AROHA-DAY-2026-08-01: 숨겨진 버튼 호출 등 우회 요청도 당일에는 저장하지 않습니다.
-        if (isArohaDayArReservationPaused(now)) {
-            updateArohaDayArReservationUi(now);
-            showMessage("오늘은 아로하데이 행사 진행으로 AR 예약이 어렵습니다.", "info");
+        if (typeof isSpecialDayArPaused === "function" && isSpecialDayArPaused(now)) {
+            updateSpecialDayPublicUi(now);
+            showMessage("오늘은 특별 행사 운영으로 AR 예약을 받지 않습니다.", "info");
             return;
         }
         if (isSubmittingAr) return;
@@ -768,8 +724,22 @@ function submitForm(type) {
             showMessage("시간을 선택해 주세요!");
             return;
         }
+        if (!getArOperatingSchedule(now).slots.some((slot) => slot.time === normalizeArTimeSlot(timeSlot))) {
+            showMessage("현재 운영하지 않는 시간대입니다. 다른 시간을 선택해 주세요.", "info");
+            generateTimeSlots(now);
+            return;
+        }
+        if (isArSlotPast(timeSlot, now)) {
+            showMessage("이미 지난 시간입니다. 다른 시간을 선택해 주세요.", "info");
+            generateTimeSlots(now);
+            return;
+        }
 
         const users = collectUsers("#ar-user-container");
+        if (users.length > AR_MAX_PARTICIPANTS) {
+            showMessage(`AR 예약은 최대 ${AR_MAX_PARTICIPANTS}명까지 등록할 수 있습니다.`, "info");
+            return;
+        }
         const validationError = validateUsers(users);
         if (validationError) {
             showMessage(validationError);
@@ -886,10 +856,10 @@ function initializePage() {
     dom.currentDate.innerText = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
     dom.startDate.value = formatLocalDate(now);
     dom.endDate.value = formatLocalDate(now);
-    // TEMP-AROHA-DAY-2026-08-01: 오늘만 예약 화면을 행사 안내로 교체합니다.
-    updateArohaDayArReservationUi(now);
 
     initFilterOptions();
+    if (typeof initializeAdminOperationsUi === "function") initializeAdminOperationsUi();
+    if (dom.arAvailableOnly) dom.arAvailableOnly.checked = window.matchMedia?.("(max-width: 640px)")?.matches === true;
     [dom.filterYearSelect, dom.filterMonthSelect, dom.startDate, dom.endDate].forEach((input) => {
         input?.addEventListener("change", () => {
             if (isAdminUser && typeof cancelAdminStatisticsLoads === "function") {
@@ -904,8 +874,6 @@ function initializePage() {
     });
     changeArCount(1);
     changeVisitCount(1);
-    // TEMP-VISIT-COMPLETION-2026-08-01: 완료 버튼을 누르기 전 새로고침해도 확인 화면을 복원합니다.
-    restoreTodayVisitCompletion();
     refreshIcons();
 
     const authLoading = document.getElementById("auth-loading");
@@ -920,7 +888,7 @@ function initializePage() {
         }
         if (authResolved && user && user.isAnonymous) return;
         try {
-            if (restoreAdminSession(user)) {
+            if (await restoreAdminSession(user)) {
                 authResolved = true;
                 return;
             }
@@ -937,6 +905,8 @@ function initializePage() {
             }
 
             authResolved = true;
+            if (typeof subscribeArOperations === "function") subscribeArOperations();
+            if (typeof subscribeSpecialDaySettings === "function") subscribeSpecialDaySettings();
             subscribeArLogsToday();
             subscribeAttendanceEventBanner();
             resumePendingRequests();
@@ -960,10 +930,6 @@ function refreshDateSensitiveState() {
     if (currentPageDate === nextDate) return;
     currentPageDate = nextDate;
     dom.currentDate.innerText = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
-    // TEMP-AROHA-DAY-2026-08-01: 자정 이후에는 예약 화면이 자동으로 다시 열립니다.
-    updateArohaDayArReservationUi(now);
-    // TEMP-VISIT-COMPLETION-2026-08-01: 자정 이후에는 임시 완료 화면을 자동 해제합니다.
-    if (!isTodayVisitCompletionEnabled(now)) hideTodayVisitCompletion();
     if (!isAdminUser) {
         dom.startDate.value = nextDate;
         dom.endDate.value = nextDate;
@@ -972,6 +938,7 @@ function refreshDateSensitiveState() {
         refreshAdminArTodayScheduleDate();
     }
     renderAttendanceEventBanner(attendanceEventsState);
+    if (typeof updateSpecialDayPublicUi === "function") updateSpecialDayPublicUi(now);
     generateTimeSlots();
 }
 

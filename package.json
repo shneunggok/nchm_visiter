@@ -1,8 +1,9 @@
 {
   "scripts": {
+    "hosting:prepare": "node scripts/prepare-hosting.mjs",
     "test": "node --test tests/stability.test.js tests/tv-admin.test.js",
     "test:emulator": "firebase emulators:exec --only auth,database --project demo-nchm \"node --test tests/firebase-emulator.test.mjs\"",
-    "check": "npm test && node --check js/firebase.js && node --check js/requests.js && node --check js/visit.js && node --check js/ar.js && node --check js/admin-data.js && node --check js/nchm.js && node --check js/tv-common.js && node --check js/tv.js && node --check js/tv-attendance.js && node --check js/tv-admin.js"
+    "check": "npm test && node --check js/firebase.js && node --check js/requests.js && node --check js/visit.js && node --check js/ar.js && node --check js/admin-data.js && node --check js/admin-operations.js && node --check js/special-days.js && node --check js/admin.js && node --check js/nchm.js && node --check js/tv-common.js && node --check js/tv.js && node --check js/tv-attendance.js && node --check js/tv-admin.js"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^3.0.4",

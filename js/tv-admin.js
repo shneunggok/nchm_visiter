@@ -27,6 +27,7 @@ let tvAdminSaving = false;
 let tvAdminRevision = 0;
 let tvAdminAttemptedRevision = -1;
 let tvAdminSaveState = "saved";
+let tvAdminLastSavedAt = 0;
 const tvAdminOperationLocks = new Set();
 const TV_CLOUD_PENDING_KEY = "nchm.tv.cloudinary.pending.v1";
 const tvAdminContentFilters = { notices: "all", events: "all", attendance: "all" };
@@ -98,7 +99,9 @@ function tvSetSaveState(state, detail) {
     tvAdminSaveState = state;
     const badge = document.getElementById("tv-save-status");
     if (!badge) return;
-    const labels = { dirty: "저장할 변경사항 있음", saving: "저장 중…", saved: "저장됨", error: "저장 실패 · 다시 시도" };
+    const savedTime = tvAdminLastSavedAt ? new Date(tvAdminLastSavedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }) : "";
+    const savedLabel = `${tvAdminSettings?.autoSave ? "자동 저장됨" : "저장됨"}${savedTime ? ` · ${savedTime}` : ""}`;
+    const labels = { dirty: "저장되지 않은 변경사항", saving: "저장 중…", saved: savedLabel, error: "저장 실패 · 다시 시도" };
     badge.textContent = detail || labels[state] || state;
     badge.className = "tv-admin-save-state";
     badge.style.background = state === "error" ? "#fff1f2" : state === "saved" ? "#ecfdf5" : "#fffbeb";
@@ -165,7 +168,7 @@ function renderTvManagement() {
       <div class="tv-admin-shell">
         <header class="tv-admin-header">
           <div><p class="tv-admin-eyebrow">DISPLAY OPERATIONS</p><h2 class="tv-admin-title">TV 관리</h2><p class="tv-admin-description">재생 순서와 화면 디자인은 상단의 ‘화면 설정 저장’으로 반영됩니다. 공지·행사·출석 이벤트는 각 콘텐츠의 등록 또는 수정 저장 버튼으로 별도 반영됩니다.</p></div>
-          <div class="tv-admin-actions"><span id="tv-save-status" class="tv-admin-save-state">${tvAdminSaveState === "saved" ? "저장됨" : "저장할 변경사항 있음"}</span><button type="button" data-tv-action="preview" class="tv-admin-button">미리보기</button><button type="button" data-tv-action="save" class="tv-admin-button tv-admin-button--primary">화면 설정 저장</button></div>
+          <div class="tv-admin-actions"><span id="tv-save-status" class="tv-admin-save-state">저장 상태 확인 중</span><button type="button" data-tv-action="preview" class="tv-admin-button">미리보기</button><button type="button" data-tv-action="save" class="tv-admin-button tv-admin-button--primary">지금 저장</button></div>
         </header>
         <div class="tv-admin-layout">
           <nav class="tv-admin-nav" aria-label="TV 관리 메뉴">
@@ -357,6 +360,7 @@ async function saveTvSettings(options = {}) {
         if (saveButton) { saveButton.disabled = true; saveButton.textContent = "저장 중..."; }
 
         await db.ref("tvSettings").set({ ...tvAdminSettings, updatedAt: firebase.database.ServerValue.TIMESTAMP });
+        tvAdminLastSavedAt = Date.now();
         tvAdminDirty = tvAdminRevision !== saveRevision;
         tvSetSaveState(tvAdminDirty ? "dirty" : "saved");
         showMessage("TV 설정이 저장되어 모든 화면에 반영되었습니다.", "success");
@@ -371,7 +375,7 @@ async function saveTvSettings(options = {}) {
     } finally {
         tvAdminSaving = false;
         const saveButton = document.querySelector("[data-tv-action=save]");
-        if (saveButton) { saveButton.disabled = false; saveButton.textContent = "화면 설정 저장"; }
+        if (saveButton) { saveButton.disabled = false; saveButton.textContent = "지금 저장"; }
         if (tvAdminDirty && TVCommon.canAutoSaveRevision(tvAdminRevision, tvAdminAttemptedRevision)) {
             tvScheduleAutoSave();
         }
@@ -460,15 +464,15 @@ async function tvPrepareUploadImage(file) {
 }
 async function tvRequireAdminSession(actionLabel) {
     let user = auth.currentUser;
-    if (!user || user.isAnonymous || String(user.email || "").toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+    if (!user || user.isAnonymous || !isAdminUser) {
         showMessage((actionLabel || "TV 관리 작업") + " 실패: 관리자 로그인 세션이 없습니다. 다시 로그인해 주세요.");
         return null;
     }
     await user.getIdToken(true);
     user = auth.currentUser;
     const token = await user?.getIdTokenResult();
-    const tokenEmail = String(token?.claims?.email || user?.email || "").toLowerCase();
-    if (!user || user.isAnonymous || tokenEmail !== ADMIN_EMAIL.toLowerCase()) {
+    const access = typeof getAdminAccessFromToken === "function" ? getAdminAccessFromToken(user, token) : { allowed: false };
+    if (!user || user.isAnonymous || !access.allowed) {
         showMessage((actionLabel || "TV 관리 작업") + " 실패: 관리자 계정으로 다시 로그인해 주세요.");
         return null;
     }
@@ -1157,7 +1161,9 @@ function loadTvSettings() {
     tvAdminSettingsListener = db.ref("tvSettings");
     tvAdminSettingsListener.on("value", (snap) => {
         if (tvAdminDirty) return;
-        tvAdminSettings = tvMerge(TV_DEFAULTS, snap.val() || {});
+        const value = snap.val() || {};
+        tvAdminLastSavedAt = Number(value.updatedAt) || tvAdminLastSavedAt;
+        tvAdminSettings = tvMerge(TV_DEFAULTS, value);
         if (!tvPanel().classList.contains("hidden")) renderTvManagement();
     }, (error) => {
         logError("tv.settings.load", error);

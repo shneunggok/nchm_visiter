@@ -525,7 +525,7 @@ function createAdminPeriodCsv(type, records) {
             ]);
         });
     } else {
-        rows.push(["예약날짜", "예약시간", "대표자", "총인원", "이용자상세"]);
+        rows.push(["예약날짜", "예약시간", "대표자", "총인원", "이용자상세", "상태"]);
         records.forEach((record) => {
             const users = toArray(record.users).filter((user) =>
                 user && typeof user === "object"
@@ -538,7 +538,8 @@ function createAdminPeriodCsv(type, records) {
                 record.timeSlot,
                 users[0]?.name || "",
                 users.length,
-                details
+                details,
+                record.status || "reserved"
             ]);
         });
     }
@@ -880,7 +881,7 @@ function updateAdminStatsProgressUi() {
         target.textContent = `${usedCache ? "세션 캐시 사용 · " : ""}전체 기간 통계 완료 · 방문 ${formatAdminStatNumber(visit.recordCount)}건 · AR ${formatAdminStatNumber(ar.recordCount)}건`;
         target.dataset.state = "complete";
     } else {
-        target.textContent = "조회 버튼을 누르면 선택 기간 전체 통계를 집계합니다.";
+        target.textContent = "이번 달 통계를 자동으로 불러옵니다.";
         target.dataset.state = "idle";
     }
 }

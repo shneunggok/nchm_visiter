@@ -10,6 +10,8 @@
 - `visit.js`: 방문 등록 로그 저장, `visitLogs` 구독/해제, 방문 데이터 상태 유지.
 - `ar.js`: AR 예약 저장, 슬롯 락 transaction, 당일/전체 AR 로그 구독, 시간대 버튼 생성, 예약 데이터 상태 유지.
 - `admin.js`: 관리자 로그인/로그아웃, 세션 타임아웃, 관리자 전용 UI 전환, 로그 구독 제어.
+- `admin-operations.js`: 통합검색, 기록 수정·수동 등록, 휴지통·복구, 변경 이력, AR 특별 운영일, 개인정보 익명화, 백업·복원을 담당.
+- `special-days.js`: 날짜별 AR 예약 중단 안내·포스터와 방문 등록 완료 확인 화면을 담당.
 - `nchm.js`: 페이지 초기화, 탭 전환, 폼 제출 흐름, 통계/테이블 렌더링, 엑셀 다운로드.
 - 'tv.js': 티비 관리에 전반적인걸 담당  
 
@@ -41,10 +43,10 @@
 5. 예약 성공 후 `generateTimeSlots()`로 최신 예약 상태를 반영합니다.
 
 ## 관리자 처리 흐름
-1. `admin.js`가 `ADMIN_EMAIL`을 사용해 이메일/비밀번호 방식으로 Firebase 로그인 처리.
-2. 로그인 후 토큰 이메일을 확인하여 관리자 여부를 검증.
+1. `admin.js`가 입력한 이메일/비밀번호로 Firebase 로그인을 처리.
+2. 로그인 후 대표 이메일 또는 `admin: true` custom claim을 확인하여 관리자 여부를 검증.
 3. 관리자 모드 진입 시 `subscribeVisitLogs()`와 `subscribeArLogsAll()`을 실행하여 데이터 구독을 시작.
-4. 로그 삭제 시 `deleteArLog()`는 AR 로그와 해당 슬롯 락을 함께 제거.
+4. 로그 삭제 시 원본을 `adminTrash`로 옮기고 AR 슬롯 락을 해제하며, 복구 시 슬롯 충돌을 다시 확인.
 5. 관리자 세션은 `resetAdminIdleTimeout()`과 사용자 활동 리스너로 자동 로그아웃을 지원.
 
 ## Firebase 데이터 구조
@@ -52,16 +54,26 @@
 visitLogs/{logId}
 arLogs/{logId}
 arSlotLocks/{slotKey}
+arOperations/{date}
+specialDaySettings/{date}
+adminTrash/{type_logId}
+adminAudit/{auditId}
+adminSettings/privacy
 ```
 
 - `visitLogs`: 방문 등록 정보 저장.
 - `arLogs`: AR 예약 정보 저장.
 - `arSlotLocks`: 예약 시간대 동시성을 제어하는 락 상태 저장.
+- `arOperations`: 날짜별 휴관, 특별 운영시간, 차단 시간대 저장.
+- `specialDaySettings`: 날짜별 AR 중단 안내·포스터와 방문 완료 확인 화면 설정 저장.
+- `adminTrash`: 삭제 원본과 삭제자·복구 만료 정보 저장.
+- `adminAudit`: 관리자 수정·삭제·복구·설정 변경 이력 저장.
+- `adminSettings/privacy`: 개인정보 보관기간과 마지막 익명화 실행 정보 저장.
 
 ## 보안 및 검증
 - `escapeHtml()`를 사용해 동적 HTML 렌더링 시 XSS 위험을 줄임.
 - CSV 다운로드 시 `sanitizeCsvField()`로 수식 주입을 방지.
-- 관리자 기능은 이메일 기반 인증 이후에만 구독/삭제 기능이 활성화되도록 구현.
+- 기존 대표 이메일 또는 Firebase custom claim `admin: true`가 있는 계정만 관리자 기능을 사용하도록 구현.
 - 입력 검증은 클라이언트 측에서 수행되며, Firebase Rules와 함께 사용되어야 함.
 
 ## 동시성 처리 방식

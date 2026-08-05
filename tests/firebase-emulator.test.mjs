@@ -61,6 +61,15 @@ function adminDb() {
     }).database();
 }
 
+function claimedAdminDb(role = "editor") {
+    return environment.authenticatedContext("teacher-admin", {
+        email: "teacher@nchm.local",
+        admin: true,
+        adminRole: role,
+        firebase: { sign_in_provider: "password" }
+    }).database();
+}
+
 function requestClaim(uid, type, requestId, payloadHash, createdAt) {
     return {
         ownerUid: uid,
@@ -351,6 +360,43 @@ test("the real AR claim, slot transaction, and atomic log flow succeeds", async 
     assert.equal(logs.size, 1);
 });
 
+test("AR reservations accept 20 participants and reject a 21st participant", async () => {
+    const twentyUsers = Array.from({ length: 20 }, (_, index) => ({
+        name: `이용자${index + 1}`,
+        gender: index % 2 ? "여" : "남",
+        age: "청년(20~24세)"
+    }));
+    const twentyOneUsers = [...twentyUsers, {
+        name: "이용자21",
+        gender: "남",
+        age: "청년(20~24세)"
+    }];
+
+    const accepted = await reserveArRequest(
+        anonymousDb("ar-twenty"),
+        "ar-twenty",
+        requestIdA,
+        payloadHashA,
+        { timeSlot: "10:00", users: twentyUsers }
+    );
+    assert.equal(accepted.replayed, false);
+    const acceptedLog = await assertSucceeds(get(ref(adminDb(), `arLogs/${requestIdA}`)));
+    assert.equal(acceptedLog.val().users.length, 20);
+
+    await assert.rejects(
+        reserveArRequest(
+            anonymousDb("ar-twenty-one"),
+            "ar-twenty-one",
+            requestIdB,
+            payloadHashB,
+            { timeSlot: "11:00", users: twentyOneUsers }
+        ),
+        (error) => error?.stage === "arLogs"
+    );
+    assert.equal((await assertSucceeds(get(ref(adminDb(), `arLogs/${requestIdB}`)))).exists(), false);
+    assert.equal((await assertSucceeds(get(ref(adminDb(), `arSlotLocks/${date}_11:00`)))).exists(), false);
+});
+
 test("two users cannot reserve the same AR slot through the real flow", async () => {
     const firstDb = anonymousDb("user-one");
     const secondDb = anonymousDb("user-two");
@@ -582,4 +628,94 @@ test("malformed or unauthorized log writes are rejected and admin delete succeed
     await assertSucceeds(set(ref(database, `visitLogs/${requestIdA}-0`), valid));
     await assertFails(update(ref(database, `visitLogs/${requestIdA}-0`), { name: "변조" }));
     await assertSucceeds(set(ref(adminDb(), `visitLogs/${requestIdA}-0`), null));
+});
+
+test("claimed teacher admins can edit records and manage operations, trash, and audit", async () => {
+    const createdAt = Date.now();
+    const original = visitLog("anonymous-owner", requestIdA, payloadHashA, createdAt);
+    await environment.withSecurityRulesDisabled(async (context) => {
+        await set(ref(context.database(), `visitLogs/${requestIdA}-0`), original);
+    });
+
+    const database = claimedAdminDb();
+    await assertSucceeds(update(ref(database, `visitLogs/${requestIdA}-0`), {
+        name: "수정이름",
+        updatedAt: createdAt,
+        updatedBy: "teacher@nchm.local"
+    }));
+    await assertSucceeds(set(ref(database, `arOperations/${date}`), {
+        closed: false,
+        start: "10:00",
+        end: "18:00",
+        blockedSlots: ["13:00", "13:30"],
+        updatedBy: "teacher@nchm.local",
+        updatedAt: createdAt
+    }));
+    await assertSucceeds(set(ref(database, `specialDaySettings/${date}`), {
+        arPauseEnabled: false,
+        arTitle: "특별 행사 안내",
+        arMessage: "행사일 운영 안내입니다.",
+        arImageUrl: "https://res.cloudinary.com/example/image/upload/poster.webp",
+        arImagePublicId: "site/special-days/poster",
+        visitReceiptEnabled: true,
+        visitReceiptTitle: "출석 완료",
+        visitReceiptMessage: "데스크 선생님에게 보여주세요.",
+        visitReceiptDelaySeconds: 10,
+        updatedBy: "teacher@nchm.local",
+        updatedAt: createdAt
+    }));
+    const manualAr = {
+        ...arLog("teacher-admin", requestIdB, payloadHashB, createdAt, "15:00"),
+        status: "reserved",
+        updatedAt: createdAt,
+        updatedBy: "teacher@nchm.local"
+    };
+    await assertSucceeds(update(ref(database), {
+        [`arLogs/${requestIdB}`]: manualAr,
+        [`arSlotLocks/${manualAr.slotKey}`]: requestIdB
+    }));
+    await assertSucceeds(set(ref(database, "adminTrash/visit_record"), {
+        type: "visit",
+        originalKey: `${requestIdA}-0`,
+        record: original,
+        deletedAt: createdAt,
+        expiresAt: createdAt + 1000,
+        deletedBy: "teacher@nchm.local"
+    }));
+    await assertSucceeds(set(ref(database, "adminAudit/change"), {
+        action: "update",
+        recordType: "visit",
+        recordKey: `${requestIdA}-0`,
+        actorUid: "teacher-admin",
+        actorEmail: "teacher@nchm.local",
+        changedAt: createdAt
+    }));
+
+    const anonymous = anonymousDb();
+    await assertSucceeds(get(ref(anonymous, `arOperations/${date}`)));
+    await assertSucceeds(get(ref(anonymous, `specialDaySettings/${date}`)));
+    await assertFails(get(ref(anonymous, "adminTrash")));
+    await assertFails(get(ref(anonymous, "adminAudit")));
+});
+
+test("a paused special day blocks public AR claims while visit registration stays available", async () => {
+    const createdAt = Date.now();
+    await assertSucceeds(set(ref(claimedAdminDb(), `specialDaySettings/${date}`), {
+        arPauseEnabled: true,
+        arTitle: "아로하데이",
+        arMessage: "오늘은 행사로 AR 예약을 받지 않습니다.",
+        arImageUrl: "",
+        arImagePublicId: "",
+        visitReceiptEnabled: true,
+        visitReceiptTitle: "출석 완료",
+        visitReceiptMessage: "데스크 선생님에게 보여주세요.",
+        visitReceiptDelaySeconds: 10,
+        updatedBy: "teacher@nchm.local",
+        updatedAt: createdAt
+    }));
+
+    const database = anonymousDb("special-day-user");
+    await assertFails(claimRequest(database, "special-day-user", requestIdA, payloadHashA, "ar"));
+    const visitClaim = await assertSucceeds(claimRequest(database, "special-day-user", requestIdB, payloadHashB, "visit"));
+    assert.equal(visitClaim.committed, true);
 });

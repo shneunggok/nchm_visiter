@@ -7,6 +7,7 @@ const dom = {
     adminTabs: document.getElementById("admin-tabs"),
     mainContentContainer: document.getElementById("main-content-container"),
     passwordModal: document.getElementById("password-modal"),
+    adminEmailInput: document.getElementById("admin-email-input"),
     adminPasswordInput: document.getElementById("admin-password-input"),
     adminVerifyBtn: document.getElementById("admin-verify-btn"),
     sectionVisit: document.getElementById("section-visit"),
@@ -14,6 +15,7 @@ const dom = {
     sectionAdmin: document.getElementById("section-admin"),
     adminVisitLogs: document.getElementById("admin-visit-logs"),
     adminArLogs: document.getElementById("admin-ar-logs"),
+    adminOperations: document.getElementById("admin-operations"),
     adminArTodayDate: document.getElementById("admin-ar-today-date"),
     adminArTodayCount: document.getElementById("admin-ar-today-count"),
     adminArTodayGrid: document.getElementById("admin-ar-today-grid"),
@@ -26,6 +28,8 @@ const dom = {
     arUserContainer: document.getElementById("ar-user-container"),
     arDayIndicator: document.getElementById("ar-day-indicator"),
     timeContainer: document.getElementById("time-container"),
+    arAvailableOnly: document.getElementById("ar-available-only"),
+    arSlotMoreButton: document.getElementById("ar-slot-more-button"),
     visitStatsBody: document.getElementById("visit-stats-body"),
     visitStatsFooter: document.getElementById("visit-stats-footer"),
     studyStatsBody: document.getElementById("study-stats-body"),
@@ -39,6 +43,8 @@ const dom = {
     vCountMinus: document.getElementById("v-count-minus"),
     vCountDisplay: document.getElementById("v-count-display"),
     arCountDisplay: document.getElementById("ar-count-display"),
+    arCountMinus: document.getElementById("ar-count-minus"),
+    arCountPlus: document.getElementById("ar-count-plus"),
     startDate: document.getElementById("start-date"),
     endDate: document.getElementById("end-date"),
     filterYearSelect: document.getElementById("filter-year-select"),
@@ -49,6 +55,9 @@ const dom = {
     btnCover: document.getElementById("btnCover"),
     btnText: document.getElementById("btnText")
 };
+
+let arOperationsState = {};
+let arOperationsListener = null;
 
 let _toastTimer = null;
 
@@ -104,16 +113,25 @@ function showMessage(msg, type = "error") {
         _toastTimer = null;
     }
 
-    box.innerText = msg;
-    box.className = "";
-    if (type === "success") box.classList.add("success");
-    if (type === "info") box.classList.add("info");
-    box.style.display = "block";
+    const normalizedType = ["success", "info"].includes(type) ? type : "error";
+    const messageElement = box.querySelector?.("#custom-alert-message");
+    const iconElement = box.querySelector?.("#custom-alert-icon");
+    const iconByType = { error: "!", success: "✓", info: "i" };
+
+    if (messageElement) messageElement.textContent = msg;
+    else box.textContent = msg;
+    if (iconElement) iconElement.textContent = iconByType[normalizedType];
+
+    box.className = normalizedType;
+    box.dataset.type = normalizedType;
+    box.setAttribute?.("role", normalizedType === "error" ? "alert" : "status");
+    box.setAttribute?.("aria-live", normalizedType === "error" ? "assertive" : "polite");
+    box.setAttribute?.("aria-atomic", "true");
+    box.style.display = "flex";
 
     const duration = Math.min(4000, Math.max(2500, msg.length * 60));
     _toastTimer = setTimeout(() => {
         box.style.display = "none";
-        box.className = "";
         _toastTimer = null;
     }, duration);
 }
@@ -126,28 +144,49 @@ function getArOperatingSchedule(date = new Date()) {
     const dateValue = date && typeof date.getTime === "function" ? date.getTime() : date;
     const parsedDate = new Date(dateValue);
     const targetDate = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+    const dateKey = formatLocalDate(targetDate);
+    const exception = arOperationsState?.[dateKey];
     const isWeekend = targetDate.getDay() === 0 || targetDate.getDay() === 6;
     const slots = [];
-    const lastHour = isWeekend ? 17 : 20;
+    if (exception?.closed === true) {
+        return { isWeekend, isClosed: true, label: "휴관일 · AR 예약 불가", slots: [] };
+    }
+    const defaultEnd = isWeekend ? "17:30" : "20:30";
+    const start = normalizeArTimeSlot(exception?.start) || "10:00";
+    const end = normalizeArTimeSlot(exception?.end) || defaultEnd;
+    const startMinutes = getArTimeMinutes(start);
+    const endMinutes = getArTimeMinutes(end);
+    const blocked = new Set(toArray(exception?.blockedSlots).map(normalizeArTimeSlot).filter(Boolean));
 
-    for (let hour = 10; hour <= lastHour; hour += 1) {
-        if (hour === 12) continue;
-        ["00", "30"].forEach((minute) => {
-            if (hour === lastHour && minute === "30") return;
-            const nextHour = minute === "30" ? hour + 1 : hour;
-            const nextMinute = minute === "30" ? "00" : "30";
-            slots.push({
-                time: `${String(hour).padStart(2, "0")}:${minute}`,
-                endTime: `${String(nextHour).padStart(2, "0")}:${nextMinute}`
-            });
+    for (let minutes = startMinutes; minutes < endMinutes; minutes += 30) {
+        const hour = Math.floor(minutes / 60);
+        const minute = String(minutes % 60).padStart(2, "0");
+        const time = `${String(hour).padStart(2, "0")}:${minute}`;
+        if ((!exception && hour === 12) || blocked.has(time)) continue;
+        const nextMinutes = minutes + 30;
+        slots.push({
+            time,
+            endTime: `${String(Math.floor(nextMinutes / 60)).padStart(2, "0")}:${String(nextMinutes % 60).padStart(2, "0")}`
         });
     }
 
     return {
         isWeekend,
-        label: isWeekend ? "주말 운영 (10:00~17:30)" : "평일 운영 (10:00~20:30)",
+        isClosed: false,
+        label: exception ? `특별 운영 (${start}~${end})` : isWeekend ? "주말 운영 (10:00~17:30)" : "평일 운영 (10:00~20:30)",
         slots
     };
+}
+
+function subscribeArOperations() {
+    if (arOperationsListener) return;
+    arOperationsListener = db.ref("arOperations");
+    arOperationsListener.on("value", (snapshot) => {
+        arOperationsState = snapshot.val() || {};
+        if (typeof generateTimeSlots === "function") generateTimeSlots();
+        if (typeof renderAdminArTodaySchedule === "function" && typeof isAdminUser !== "undefined" && isAdminUser) renderAdminArTodaySchedule();
+        if (typeof renderAdminArOperations === "function") renderAdminArOperations();
+    }, (error) => logError("ar-operations", error));
 }
 
 function getArTimeMinutes(value) {
@@ -155,6 +194,14 @@ function getArTimeMinutes(value) {
         ? value.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/)
         : null;
     return match ? Number(match[1]) * 60 + Number(match[2]) : null;
+}
+
+function isArSlotPast(timeSlot, date = new Date()) {
+    const slotMinutes = getArTimeMinutes(timeSlot);
+    const targetDate = date instanceof Date ? date : new Date(date);
+    if (slotMinutes === null || Number.isNaN(targetDate.getTime())) return true;
+    const currentMinutes = targetDate.getHours() * 60 + targetDate.getMinutes();
+    return slotMinutes < currentMinutes;
 }
 
 function normalizeArTimeSlot(value) {

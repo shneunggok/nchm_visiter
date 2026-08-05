@@ -1,4 +1,23 @@
 {
+  "hosting": {
+    "public": "hosting-dist",
+    "predeploy": "npm run hosting:prepare",
+    "ignore": [
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(html|js|css)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ]
+  },
   "database": {
     "rules": "database.rules.json"
   },

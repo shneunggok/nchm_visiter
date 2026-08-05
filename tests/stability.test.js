@@ -77,6 +77,12 @@ test("shared utilities reject impossible dates and normalize Firebase collection
     assert.equal(context.normalizeArTimeSlot("9:00"), "09:00");
     assert.equal(context.normalizeArTimeSlot("10:30"), "10:30");
     assert.equal(context.normalizeArTimeSlot("invalid"), "");
+    assert.equal(context.isArSlotPast("10:00", new Date(2026, 7, 2, 9, 59, 59)), false);
+    assert.equal(context.isArSlotPast("10:00", new Date(2026, 7, 2, 10, 0, 59)), false);
+    assert.equal(context.isArSlotPast("10:00", new Date(2026, 7, 2, 10, 1, 0)), true);
+    assert.equal(context.isArSlotPast("10:30", new Date(2026, 7, 2, 10, 29, 59)), false);
+    assert.equal(context.isArSlotPast("10:30", new Date(2026, 7, 2, 10, 30, 0)), false);
+    assert.equal(context.isArSlotPast("invalid", new Date(2026, 7, 2, 10, 0, 0)), true);
 });
 
 test("multi-person visit submission uses one atomic root update", async () => {
@@ -2420,134 +2426,254 @@ test("a failed aggregate query exits loading state and can be retried", async ()
     assert.equal(context.getAdminPeriodAggregate("visit").recordCount, 1);
 });
 
-test("Aroha Day replaces only the August 1 AR reservation screen and keeps a save guard", () => {
-    const createToggleElement = (hidden) => {
-        const classes = new Set(hidden ? ["hidden"] : []);
-        return {
-            dataset: {},
-            attributes: {},
-            classList: {
-                toggle(name, force) {
-                    if (force) classes.add(name);
-                    else classes.delete(name);
-                },
-                contains(name) { return classes.has(name); }
-            },
-            setAttribute(name, value) { this.attributes[name] = value; }
-        };
-    };
-    const notice = createToggleElement(true);
-    const reservation = createToggleElement(false);
-    const sectionAr = createToggleElement(true);
-    const elements = {
-        "aroha-day-ar-notice": notice,
-        "ar-reservation-content": reservation
-    };
-    const source = fs.readFileSync(path.join(projectRoot, "js/nchm.js"), "utf8");
-    const context = runScript("js/nchm.js", {
-        window: { addEventListener() {} },
-        document: {
-            addEventListener() {},
-            getElementById(id) { return elements[id] || null; }
+function createToggleClassList(initial = []) {
+    const classes = new Set(initial);
+    return {
+        add(...names) { names.forEach((name) => classes.add(name)); },
+        remove(...names) { names.forEach((name) => classes.delete(name)); },
+        toggle(name, force) {
+            if (force === undefined) {
+                if (classes.has(name)) classes.delete(name);
+                else classes.add(name);
+                return classes.has(name);
+            }
+            if (force) classes.add(name);
+            else classes.delete(name);
+            return force;
         },
-        dom: { sectionAr },
-        formatLocalDate(date) {
-            return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
-                .map((part, index) => index ? String(part).padStart(2, "0") : String(part))
-                .join("-");
-        }
-    });
-
-    assert.equal(context.updateArohaDayArReservationUi(new Date(2026, 7, 1, 12)), true);
-    assert.equal(notice.classList.contains("hidden"), false);
-    assert.equal(reservation.classList.contains("hidden"), true);
-    assert.equal(sectionAr.dataset.arohaDay, "active");
-
-    assert.equal(context.updateArohaDayArReservationUi(new Date(2026, 7, 2, 0)), false);
-    assert.equal(notice.classList.contains("hidden"), true);
-    assert.equal(reservation.classList.contains("hidden"), false);
-    assert.equal(sectionAr.dataset.arohaDay, "inactive");
-    assert.match(source, /if \(isArohaDayArReservationPaused\(now\)\) \{/);
-
-    const markup = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
-    assert.match(markup, /assets\/events\/aroha-day-2026-08-01\.jpg/);
-    assert.ok(fs.statSync(path.join(projectRoot, "assets/events/aroha-day-2026-08-01.jpg")).size > 100000);
-});
-
-test("August 1 visit completion stays open until its ten-second button unlocks", () => {
-    const classes = new Set(["hidden"]);
-    const modal = {
-        attributes: {},
-        classList: {
-            add(name) { classes.add(name); },
-            remove(name) { classes.delete(name); },
-            contains(name) { return classes.has(name); }
-        },
-        setAttribute(name, value) { this.attributes[name] = value; }
+        contains(name) { return classes.has(name); }
     };
-    const button = { disabled: false, focusCalled: false, focus() { this.focusCalled = true; } };
-    const cover = { style: {}, offsetWidth: 100 };
-    const buttonText = { textContent: "" };
-    const count = { textContent: "" };
-    const time = { textContent: "" };
-    const elements = {
-        "visit-completion-modal": modal,
-        "visit-completion-count": count,
-        "visit-completion-time": time,
-        "visit-completion-button": button,
-        "visit-completion-button-cover": cover,
-        "visit-completion-button-text": buttonText
-    };
-    const stored = new Map();
-    const source = fs.readFileSync(path.join(projectRoot, "js/nchm.js"), "utf8");
-    const context = runScript("js/nchm.js", {
+}
+
+function createNchmRuntimeContext(overrides = {}) {
+    const {
+        window: windowOverrides = {},
+        document: documentOverrides = {},
+        ...contextOverrides
+    } = overrides;
+    return runScript("js/nchm.js", {
         window: {
             addEventListener() {},
-            setInterval,
             clearInterval,
-            sessionStorage: {
-                setItem(key, value) { stored.set(key, value); },
-                getItem(key) { return stored.get(key) || null; },
-                removeItem(key) { stored.delete(key); }
-            }
+            setInterval,
+            clearTimeout,
+            setTimeout,
+            confirm() { return true; },
+            ...windowOverrides
         },
         document: {
             addEventListener() {},
-            getElementById(id) { return elements[id] || null; },
-            querySelector() { return { focus() {} }; }
+            getElementById() { return null; },
+            ...documentOverrides
         },
-        formatLocalDate(date) {
-            return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
-                .map((part, index) => index ? String(part).padStart(2, "0") : String(part))
-                .join("-");
+        ...contextOverrides
+    });
+}
+
+test("AR participant controls allow 20 people and block the 21st input", () => {
+    const children = [];
+    const container = {
+        appendChild(child) {
+            children.push(child);
+            child.remove = () => children.splice(children.indexOf(child), 1);
         },
+        get lastElementChild() { return children.at(-1) || null; }
+    };
+    const createCountButton = () => ({
+        disabled: false,
+        attributes: {},
+        classList: createToggleClassList(),
+        setAttribute(name, value) { this.attributes[name] = value; }
+    });
+    const minus = createCountButton();
+    const plus = createCountButton();
+    const messages = [];
+    const context = createNchmRuntimeContext({
+        document: {
+            addEventListener() {},
+            getElementById() { return null; },
+            createElement() {
+                return {
+                    className: "",
+                    innerHTML: "",
+                    querySelector() { return { focus() {} }; }
+                };
+            }
+        },
+        dom: {
+            arUserContainer: container,
+            arCountDisplay: { innerText: "0" },
+            arCountMinus: minus,
+            arCountPlus: plus
+        },
+        AGE_GROUPS: ["청년(20~24세)"],
+        escapeHtml: String,
+        refreshIcons() {},
+        showMessage(message, type) { messages.push({ message, type }); }
+    });
+
+    for (let index = 0; index < 20; index += 1) {
+        assert.equal(context.changeArCount(1), true);
+    }
+    assert.equal(children.length, 20);
+    assert.equal(plus.disabled, true);
+    assert.equal(plus.attributes["aria-disabled"], "true");
+
+    assert.equal(context.changeArCount(1), false);
+    assert.equal(children.length, 20);
+    assert.deepEqual(messages.at(-1), {
+        message: "AR 예약은 최대 20명까지 등록할 수 있습니다.",
+        type: "info"
+    });
+});
+
+test("toast variants expose distinct visuals and live-region semantics", () => {
+    const attributes = {};
+    const messageElement = { textContent: "" };
+    const iconElement = { textContent: "" };
+    const toast = {
+        className: "",
+        dataset: {},
+        style: {},
+        querySelector(selector) {
+            if (selector === "#custom-alert-message") return messageElement;
+            if (selector === "#custom-alert-icon") return iconElement;
+            return null;
+        },
+        setAttribute(name, value) { attributes[name] = value; }
+    };
+    const context = runScript("js/utils.js", {
+        document: {
+            ...createDocumentStub(),
+            getElementById(id) { return id === "custom-alert" ? toast : null; }
+        },
+        window: {},
+        AGE_GROUPS: [],
+        lucide: null,
+        setTimeout() { return 1; },
+        clearTimeout() {}
+    });
+
+    context.showMessage("저장 실패");
+    assert.equal(toast.className, "error");
+    assert.equal(attributes.role, "alert");
+    assert.equal(attributes["aria-live"], "assertive");
+    assert.equal(iconElement.textContent, "!");
+
+    context.showMessage("저장 완료", "success");
+    assert.equal(toast.className, "success");
+    assert.equal(attributes.role, "status");
+    assert.equal(attributes["aria-live"], "polite");
+    assert.equal(iconElement.textContent, "✓");
+
+    context.showMessage("확인 안내", "info");
+    assert.equal(toast.className, "info");
+    assert.equal(attributes.role, "status");
+    assert.equal(iconElement.textContent, "i");
+    assert.equal(messageElement.textContent, "확인 안내");
+});
+
+test("admin deletion confirms the visible target before the existing atomic update", async () => {
+    let shouldConfirm = false;
+    let confirmationText = "";
+    const updates = [];
+    const messages = [];
+    const context = createNchmRuntimeContext({
+        window: {
+            confirm(message) {
+                confirmationText = message;
+                return shouldConfirm;
+            }
+        },
+        visitLogs: [{
+            _key: "visit-key",
+            requestId: "visit-request",
+            name: "방문자",
+            date: "2026-08-02",
+            time: "10:30"
+        }],
+        arLogs: [{
+            _key: "ar-key",
+            requestId: "ar-request",
+            slotKey: "2026-08-02_11:00",
+            date: "2026-08-02",
+            timeSlot: "11:00",
+            users: [{ name: "대표자" }]
+        }],
+        toArray(value) { return Array.isArray(value) ? value : []; },
+        createSlotKey(date, time) { return `${date}_${time}`; },
+        db: { ref() { return { update(payload) { updates.push(payload); return Promise.resolve(); } }; } },
+        invalidateAdminStatsCache() {},
+        invalidateAdminLegacyVisitCache() {},
+        loadAdminLogPage() { return Promise.resolve(); },
+        reloadAdminStatistics() { return Promise.resolve(); },
+        showMessage(message, type) { messages.push({ message, type }); },
         logError() {}
     });
-    const completedAt = new Date(2026, 7, 1, 9, 5).getTime();
 
-    assert.equal(context.isTodayVisitCompletionEnabled(new Date(2026, 7, 1, 23, 59)), true);
-    assert.equal(context.isTodayVisitCompletionEnabled(new Date(2026, 7, 2, 0, 0)), false);
-    assert.equal(context.showTodayVisitCompletion(2, completedAt, Date.now() + 10000), true);
-    assert.equal(modal.classList.contains("hidden"), false);
-    assert.equal(modal.attributes["aria-hidden"], "false");
-    assert.equal(button.disabled, true);
-    assert.match(buttonText.textContent, /^완료 \(10초\)$/);
-    assert.equal(count.textContent, "오늘 방문 2명");
-    assert.equal(time.textContent, "09:05 등록");
+    assert.equal(context.deleteVisitLog("visit-key"), false);
+    assert.equal(updates.length, 0);
+    assert.match(confirmationText, /방문자/);
+    assert.match(confirmationText, /2026-08-02/);
 
-    context.closeTodayVisitCompletion();
-    assert.equal(modal.classList.contains("hidden"), false);
-    assert.ok(stored.size > 0);
+    shouldConfirm = true;
+    await context.deleteVisitLog("visit-key");
+    assert.deepEqual(JSON.parse(JSON.stringify(updates[0])), {
+        "visitLogs/visit-key": null,
+        "requestClaims/visit-request": null
+    });
 
-    assert.equal(context.showTodayVisitCompletion(2, completedAt, Date.now() - 1), true);
-    assert.equal(button.disabled, false);
-    assert.equal(buttonText.textContent, "완료 ✓");
-    context.closeTodayVisitCompletion();
-    assert.equal(modal.classList.contains("hidden"), true);
-    assert.equal(stored.size, 0);
+    await context.deleteArLog("ar-key");
+    assert.match(confirmationText, /대표자/);
+    assert.match(confirmationText, /11:00/);
+    assert.deepEqual(JSON.parse(JSON.stringify(updates[1])), {
+        "arLogs/ar-key": null,
+        "arSlotLocks/2026-08-02_11:00": null,
+        "requestClaims/ar-request": null
+    });
+    assert.ok(messages.every((entry) => entry.type === "success"));
+});
 
-    assert.match(source, /if \(!showTodayVisitCompletion\(users\.length, Date\.now\(\)\)\)/);
+test("first-pass responsive and accessibility markup is present", () => {
     const markup = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
-    assert.match(markup, /이 화면을 <strong>데스크 선생님에게<\/strong>/);
-    assert.match(markup, /완료 \(10초\)/);
+    const css = fs.readFileSync(path.join(projectRoot, "nchm.css"), "utf8");
+    const source = fs.readFileSync(path.join(projectRoot, "js/nchm.js"), "utf8");
+
+    assert.match(markup, /id="custom-alert"[^>]*role="alert"[^>]*aria-live="assertive"/);
+    assert.match(markup, /id="admin-entry-btn"[^>]*aria-label="관리자 로그인 열기"/);
+    assert.match(markup, /id="exit-admin-btn"[^>]*aria-label="관리자 모드 종료"/);
+    assert.match(markup, /id="ar-count-minus"[^>]*aria-label=/);
+    assert.match(markup, /id="ar-count-plus"[^>]*aria-label=/);
+    assert.match(markup, /visit-purpose-grid/);
+    assert.match(markup, /admin-detail-table-wrapper/);
+    assert.match(css, /@media \(max-width: 360px\)[\s\S]*?visit-purpose-grid[\s\S]*?repeat\(3,/);
+    assert.match(css, /admin-detail-table--visit\s*\{\s*min-width: 720px/);
+    assert.match(css, /admin-detail-table--ar\s*\{\s*min-width: 900px/);
+    assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?attendance-event-banner-track[\s\S]*?animation: none/);
+    assert.match(source, /let currentFilter = "month"/);
+    assert.match(markup, /<button(?=[^>]*id="filter-month")(?=[^>]*class="[^"]*active)[^>]*>/);
+});
+
+test("expired August 1 temporary code and asset are removed", () => {
+    const combinedSource = ["index.html", "js/nchm.js", "nchm.css"]
+        .map((relativePath) => fs.readFileSync(path.join(projectRoot, relativePath), "utf8"))
+        .join("\n");
+    assert.doesNotMatch(combinedSource, /TEMP-(?:AROHA-DAY|VISIT-COMPLETION)-2026-08-01/);
+    assert.doesNotMatch(combinedSource, /aroha-day-2026-08-01\.jpg/);
+    assert.equal(fs.existsSync(path.join(projectRoot, "assets/events/aroha-day-2026-08-01.jpg")), false);
+});
+
+test("reusable AR pause screen preserves the August 1 poster-first design without a hardcoded date", () => {
+    const markup = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
+    const css = fs.readFileSync(path.join(projectRoot, "nchm.css"), "utf8");
+    const source = fs.readFileSync(path.join(projectRoot, "js/special-days.js"), "utf8");
+
+    assert.match(markup, /id="special-day-ar-notice"/);
+    assert.match(markup, /id="special-day-ar-image"[^>]*loading="lazy"[^>]*decoding="async"/);
+    assert.match(css, /special-day-ar-notice[\s\S]*?linear-gradient\(155deg, #1838d6 0%, #2349e8 54%, #1732bb 100%\)/);
+    assert.match(css, /special-day-ar-date[\s\S]*?background: #ffdf6b/);
+    assert.match(css, /special-day-ar-image-frame[\s\S]*?border: 7px solid rgba\(255, 255, 255, \.94\)/);
+    assert.match(source, /formatSpecialDayDisplayDate/);
+    assert.match(source, /setting\?\.arImageUrl/);
+    assert.doesNotMatch(source, /2026-08-01/);
 });

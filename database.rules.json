@@ -169,6 +169,18 @@
       ".read": "auth != null",
       ".write": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || auth.token.admin === true)"
     },
+    "attendanceEventClaims": {
+      ".read": "auth != null",
+      ".write": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || auth.token.admin === true)",
+      "$eventId": {
+        "$claimKey": {
+          ".validate": "newData.hasChildren(['status','claimedAt'])",
+          "status": { ".validate": "newData.val() === 'claimed'" },
+          "claimedAt": { ".validate": "newData.isNumber() && newData.val() <= now" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
     "tvContent": {
       ".read": "auth != null",
       ".write": "auth != null && (auth.token.email === 'shneunggok@gmail.com' || auth.token.admin === true)",

@@ -510,6 +510,7 @@ async function tvLoadAttendanceEventsEditor() {
             if (cached?.signature === signature) {
                 event.__logs = cached.logs;
                 event.__truncated = cached.truncated;
+                event.__claims = cached.claims || {};
             } else if (cached) {
                 tvAttendanceResultCache.delete(id);
             }
@@ -540,7 +541,10 @@ async function tvLoadAttendanceResult(id) {
         const ref = event.type === "ar" ? arLogsRef : visitLogsRef;
         let query = ref.orderByChild("date").startAt(event.startDate);
         if (event.endDate && isValidDateKey(event.endDate)) query = query.endAt(event.endDate);
-        const snapshot = await query.limitToLast(5001).once("value");
+        const [snapshot, claimsSnapshot] = await Promise.all([
+            query.limitToLast(5001).once("value"),
+            db.ref("attendanceEventClaims/" + id).once("value")
+        ]);
         const logs = [];
         snapshot.forEach((child) => {
             const value = child.val();
@@ -548,10 +552,12 @@ async function tvLoadAttendanceResult(id) {
         });
         event.__truncated = logs.length > 5000;
         event.__logs = event.__truncated ? logs.slice(-5000) : logs;
+        event.__claims = claimsSnapshot.val() || {};
         tvAttendanceResultCache.set(id, {
             signature: JSON.stringify([event.type, event.startDate, event.endDate, event.criteriaCount]),
             logs: event.__logs,
-            truncated: event.__truncated
+            truncated: event.__truncated,
+            claims: event.__claims
         });
     } catch (error) {
         logError("tv.attendanceResult.load", error);
@@ -563,7 +569,17 @@ async function tvLoadAttendanceResult(id) {
     }
 }
 function tvAttendanceStatus(event) { const today = formatLocalDate(); return event.startDate > today ? "예정" : (!event.endDate || event.endDate >= today) ? "진행중" : "종료"; }
-function tvMaskName(name) { const value = String(name || "").trim(); return value.length < 2 ? value : value[0] + "*" + value.slice(-1); }
+function tvAttendanceClaimKey(userKey) {
+    const value = "nchm-attendance-claim-v1|" + String(userKey || "");
+    let first = 2166136261;
+    let second = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+        const code = value.charCodeAt(index);
+        first = Math.imul(first ^ code, 16777619) >>> 0;
+        second = Math.imul(second ^ (code + index), 2246822519) >>> 0;
+    }
+    return "u-" + first.toString(36) + second.toString(36);
+}
 function tvAttendanceRanking(event) {
     const source = Array.isArray(event.__logs) ? event.__logs : [];
     const dailyParticipants = new Set();
@@ -584,12 +600,12 @@ function tvAttendanceRanking(event) {
             const uid = String(user?.uid || user?.userUid || user?.userId || user?.memberId || user?.visitorId || "").trim();
             const phone = String(user?.phone || user?.phoneNumber || user?.mobile || "").replace(/\D/g, "");
             if (!name && !uid && !phone) return;
-            const normalizedName = name.replace(/\s+/g, "");
+            const normalizedName = name.toLocaleLowerCase("ko").replace(/\s+/g, "");
             const identityKey = uid ? `id:${uid}` : phone ? `phone:${phone}` : `name:${normalizedName}\u0000age:${age}`;
             const dailyKey = `${log.date}\u0000${identityKey}`;
             if (dailyParticipants.has(dailyKey)) return;
             dailyParticipants.add(dailyKey);
-            if (!result[identityKey]) result[identityKey] = { name: name || "이용자", age, count: 0 };
+            if (!result[identityKey]) result[identityKey] = { userKey: identityKey, name: name || "이용자", age, count: 0 };
             result[identityKey].count += 1;
         });
         return result;
@@ -611,13 +627,15 @@ function tvRenderAttendanceEvents(items) {
         const loaded = Array.isArray(event.__logs);
         const loading = tvAttendanceResultLoads.has(id);
         const ranking = loaded ? tvAttendanceRanking(event) : [];
+        const claimedCount = ranking.filter((item) => event.__claims?.[tvAttendanceClaimKey(item.userKey)]).length;
         const result = loaded
-            ? `<details class="tv-admin-item-meta"><summary><b>조건 충족 결과 ${ranking.length}명</b></summary><ol>${ranking.slice(0, 5).map((item, index) => `<li>${index + 1}위 ${tvMaskName(item.name)} · ${item.count}회</li>`).join("") || "<li>아직 조건을 만족한 이용자가 없습니다.</li>"}</ol>${event.__truncated ? "<p>최근 5,000건 기준의 제한된 결과입니다.</p>" : ""}</details>`
+            ? `<details class="tv-admin-item-meta"><summary><b>조건 충족 결과 ${ranking.length}명 · 수령 완료 ${claimedCount}명</b></summary><ol>${ranking.map((item, index) => { const claimed = event.__claims?.[tvAttendanceClaimKey(item.userKey)]; return `<li>${index + 1}위 ${tvEscape(item.name || "이용자")} · ${item.count}회 · <button type="button" data-tv-attendance-claim="${id}:${tvAttendanceClaimKey(item.userKey)}" data-tv-attendance-claimed="${claimed ? "true" : "false"}" class="tv-admin-text-action">${claimed ? "수령 완료 취소" : "수령 완료"}</button></li>`; }).join("") || "<li>아직 조건을 만족한 이용자가 없습니다.</li>"}</ol><p>수령 완료자는 TV 순위표에서 자동으로 제외됩니다.</p>${event.__truncated ? "<p>최근 5,000건 기준의 제한된 결과입니다.</p>" : ""}</details>`
             : `<button type="button" data-tv-attendance-result="${id}" ${loading ? "disabled" : ""} class="tv-admin-button">${loading ? "결과 불러오는 중…" : "결과 불러오기"}</button>`;
         const badgeClass = status === "진행중" ? "tv-admin-badge--live" : status === "예정" ? "tv-admin-badge--upcoming" : "tv-admin-badge--ended";
         return `<article class="tv-admin-item ${status === "진행중" ? "is-live" : ""}"><div class="tv-admin-item-head"><div><p class="tv-admin-item-title">${event.type === "ar" ? "AR 출석" : "방문 출석"} · ${tvEscape(event.title || "이벤트")}</p><p class="tv-admin-item-meta">${tvEscape(event.startDate)} ~ ${tvEscape(event.endDate || "계속")} · 기준 ${Number(event.criteriaCount || 1)}회 · 당첨 ${Number(event.winnerCount || 0)}명</p></div><span class="tv-admin-badge ${badgeClass}">${status}${status === "진행중" ? " · TV 노출" : ""}</span></div><div class="tv-admin-item-actions">${result}<button data-tv-attendance-edit="${id}" class="tv-admin-text-action">수정</button><button data-tv-attendance-delete="${id}" class="tv-admin-text-action tv-admin-text-action--danger">삭제</button></div></article>`;
     }).join("") || "<p class='tv-admin-item-meta'>해당 상태의 출석 이벤트가 없습니다.</p>";
     root.querySelectorAll("[data-tv-attendance-result]").forEach((button) => button.addEventListener("click", () => tvLoadAttendanceResult(button.dataset.tvAttendanceResult)));
+    root.querySelectorAll("[data-tv-attendance-claim]").forEach((button) => button.addEventListener("click", () => tvSetAttendanceClaim(button)));
     root.querySelectorAll("[data-tv-attendance-edit]").forEach((button) => button.addEventListener("click", () => tvEditAttendanceEvent(button.dataset.tvAttendanceEdit, button)));
     root.querySelectorAll("[data-tv-attendance-delete]").forEach((button) => button.addEventListener("click", async () => {
         const id = button.dataset.tvAttendanceDelete;
@@ -630,7 +648,10 @@ function tvRenderAttendanceEvents(items) {
         if (!tvAcquireLock(lock)) return;
         button.disabled = true;
         try {
-            await tvContentRef("attendanceEvents").child(id).remove();
+            await Promise.all([
+                tvContentRef("attendanceEvents").child(id).remove(),
+                db.ref("attendanceEventClaims/" + id).remove()
+            ]);
             tvAttendanceResultCache.delete(id);
             await tvLoadAttendanceEventsEditor();
         } catch (error) {
@@ -639,6 +660,35 @@ function tvRenderAttendanceEvents(items) {
             tvReleaseLock(lock);
         }
     }));
+}
+
+async function tvSetAttendanceClaim(button) {
+    const [eventId, claimKey] = String(button.dataset.tvAttendanceClaim || "").split(":");
+    if (!eventId || !claimKey) return;
+    const lockKey = "attendance-claim:" + eventId + ":" + claimKey;
+    if (!tvAcquireLock(lockKey)) return;
+    const wasClaimed = button.dataset.tvAttendanceClaimed === "true";
+    try {
+        const user = await tvRequireAdminSession("출석 이벤트 수령 처리");
+        if (!user) return;
+        const ref = db.ref("attendanceEventClaims/" + eventId + "/" + claimKey);
+        if (wasClaimed) {
+            await ref.remove();
+        } else {
+            await ref.set({
+                status: "claimed",
+                claimedAt: firebase.database.ServerValue.TIMESTAMP
+            });
+        }
+        tvAttendanceResultCache.delete(eventId);
+        await tvLoadAttendanceEventsEditor();
+        showMessage(wasClaimed ? "수령 완료 처리를 취소했습니다." : "수령 완료 처리했습니다. TV에서 해당 이용자가 제외됩니다.", "success");
+    } catch (error) {
+        logError("tv.attendanceClaim", error);
+        showMessage("수령 처리 실패: " + (error?.code || error?.message || "unknown_error"));
+    } finally {
+        tvReleaseLock(lockKey);
+    }
 }
 function tvCloseEditorModal(value) {
     const modal = tvAdminEditorModal;

@@ -15,12 +15,14 @@ var tvAttendanceState = {
     events: null,
     visitLogs: null,
     arLogs: null,
+    claims: { visit: {}, ar: {} },
     eventError: false,
     visitError: false,
     arError: false,
     preferences: { attendanceVisit: true, attendanceAr: true },
     listeners: [],
     querySignatures: {},
+    claimSignatures: {},
     subscriptionGeneration: null,
     statusDate: "",
     dateTimer: null,
@@ -213,6 +215,20 @@ function attendanceUserKey(participant) {
     return "name:" + normalizedName + "\u0000age:" + participant.age;
 }
 
+// The TV reads claim records to hide recipients, so the Firebase key must not
+// expose a raw user key (which may contain a phone number).
+function attendanceClaimKey(userKey) {
+    var value = "nchm-attendance-claim-v1|" + String(userKey || "");
+    var first = 2166136261;
+    var second = 2166136261;
+    for (var index = 0; index < value.length; index += 1) {
+        var code = value.charCodeAt(index);
+        first = Math.imul(first ^ code, 16777619) >>> 0;
+        second = Math.imul(second ^ (code + index), 2246822519) >>> 0;
+    }
+    return "u-" + first.toString(36) + second.toString(36);
+}
+
 function normalizeAttendanceRecords(type, logs) {
     var stats = {
         rawRecords: 0,
@@ -261,7 +277,7 @@ function normalizeAttendanceRecords(type, logs) {
     return { records: records, stats: stats };
 }
 
-function getAttendanceRankingData(event, logs) {
+function getAttendanceRankingData(event, logs, claims) {
     if (!event) return { validRecords: [], ranking: [], displayedRanking: [], lastUpdated: 0, diagnostics: {} };
     var normalized = normalizeAttendanceRecords(event.type, logs);
     var stats = normalized.stats;
@@ -302,14 +318,16 @@ function getAttendanceRankingData(event, logs) {
     return {
         validRecords: validRecords,
         ranking: ranking,
-        displayedRanking: ranking.slice(0, TV_ATTENDANCE_CONFIG.limit),
+        displayedRanking: ranking.filter(function(item) {
+            return !claims || !claims[attendanceClaimKey(item.userKey)];
+        }).slice(0, TV_ATTENDANCE_CONFIG.limit),
         lastUpdated: lastUpdated,
         diagnostics: stats
     };
 }
 
-function sortAttendanceRanking(event, logs) {
-    return getAttendanceRankingData(event, logs).displayedRanking;
+function sortAttendanceRanking(event, logs, claims) {
+    return getAttendanceRankingData(event, logs, claims).displayedRanking;
 }
 
 function attendanceBoardHeader(event, status, type) {
@@ -451,7 +469,7 @@ function renderAttendanceBoard(type) {
             displayedRanking: TV_ATTENDANCE_SAMPLE_RANKINGS,
             lastUpdated: 0
         }
-        : getAttendanceRankingData(event, logs);
+        : getAttendanceRankingData(event, logs, tvAttendanceState.claims[type]);
     var ranking = rankingData.displayedRanking;
     reportAttendanceDiagnostics(type, event, rankingData.diagnostics);
     var tickerItems = getAttendanceTickerItems(type);
@@ -531,6 +549,7 @@ function refreshAttendanceDateState() {
     renderAttendanceBoard("ar");
     syncAttendanceSlideAvailability();
     refreshAttendanceLogSubscriptions();
+    refreshAttendanceClaimSubscriptions();
 }
 
 function getTvAttendanceSubscriptionCount() {
@@ -556,9 +575,13 @@ function subscribeAttendanceBoards(generation) {
     var success = function(snapshot) {
         if (typeof isTvSubscriptionGenerationCurrent === "function" &&
             !isTvSubscriptionGenerationCurrent(generation)) return;
-        tvAttendanceState.events = attendanceSnapshotValue(snapshot);
+        tvAttendanceState.events = Object.entries(attendanceSnapshotValue(snapshot)).reduce(function(result, entry) {
+            result[entry[0]] = Object.assign({ eventId: entry[0] }, entry[1]);
+            return result;
+        }, {});
         tvAttendanceState.eventError = false;
         refreshAttendanceLogSubscriptions();
+        refreshAttendanceClaimSubscriptions();
         renderAttendanceBoard("visit");
         renderAttendanceBoard("ar");
         syncAttendanceSlideAvailability();
@@ -655,6 +678,36 @@ function refreshAttendanceLogSubscriptions() {
     subscribeAttendanceLogSource("ar", arLogsRef);
 }
 
+function subscribeAttendanceClaimSource(type) {
+    var event = selectAttendanceEvent(tvAttendanceState.events, type);
+    var eventId = String(event && event.eventId || "");
+    if (tvAttendanceState.claimSignatures[type] === eventId) return;
+    tvAttendanceState.claimSignatures[type] = eventId;
+    removeAttendanceListener("claims:" + type);
+    tvAttendanceState.claims[type] = {};
+    if (!eventId) return;
+
+    var generation = tvAttendanceState.subscriptionGeneration;
+    var ref = db.ref("attendanceEventClaims/" + eventId);
+    var success = function(snapshot) {
+        if (typeof isTvSubscriptionGenerationCurrent === "function" &&
+            !isTvSubscriptionGenerationCurrent(generation)) return;
+        tvAttendanceState.claims[type] = attendanceSnapshotValue(snapshot);
+        renderAttendanceBoard(type);
+    };
+    var failure = function(error) {
+        console.error("[tv-attendance:claims] Firebase subscription error:", error && (error.code || error.message));
+    };
+    ref.on("value", success, failure);
+    tvAttendanceState.listeners.push({ kind: "claims:" + type, ref: ref, success: success });
+}
+
+function refreshAttendanceClaimSubscriptions() {
+    if (isAttendanceDemoMode() || tvAttendanceState.events === null) return;
+    subscribeAttendanceClaimSource("visit");
+    subscribeAttendanceClaimSource("ar");
+}
+
 function unsubscribeAttendanceBoards() {
     tvAttendanceState.listeners.forEach(function(listener) {
         listener.ref.off("value", listener.success);
@@ -668,4 +721,6 @@ function unsubscribeAttendanceBoards() {
     tvAttendanceState.subscriptionGeneration = null;
     tvAttendanceState.debugSignatures = {};
     tvAttendanceState.querySignatures = {};
+    tvAttendanceState.claimSignatures = {};
+    tvAttendanceState.claims = { visit: {}, ar: {} };
 }

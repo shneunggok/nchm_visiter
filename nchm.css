@@ -1168,7 +1168,7 @@ button.admin-ar-slot-card:focus-visible {
     .admin-chart-row { grid-template-columns: 76px minmax(80px, 1fr) 40px; }
     #admin-statistics-panel .flex.flex-wrap.items-center.justify-between { align-items: stretch; }
     #admin-statistics-panel .flex.flex-wrap.gap-2.items-center { width: 100%; }
-    #admin-search-button { width: 100%; margin-left: 0 !important; justify-content: center; }
+    #admin-period-search-button { width: 100%; margin-left: 0 !important; justify-content: center; }
 }
 
 @media (min-width: 900px) {

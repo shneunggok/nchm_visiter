@@ -1462,6 +1462,20 @@ function createFirebasePageRef(records, options = {}) {
         return firstKey < secondKey ? -1 : 1;
     };
     return {
+        once() {
+            if (options.onRead) options.onRead({ field: null, fullRead: true });
+            return Promise.resolve({
+                forEach(callback) {
+                    records.forEach((record) => callback({
+                        key: record._key,
+                        val() {
+                            const { _key, ...value } = record;
+                            return value;
+                        }
+                    }));
+                }
+            });
+        },
         orderByChild(field) {
             const state = {
                 field,
@@ -1534,6 +1548,80 @@ function createFirebasePageRef(records, options = {}) {
         }
     };
 }
+
+test("admin integrated name search normalizes Korean text and searches every AR participant", async () => {
+    const visitReadFields = [];
+    const elements = new Map(Object.entries({
+        "admin-search-name": { value: " 김  민수 " },
+        "admin-search-start": { value: "2026-08-01" },
+        "admin-search-end": { value: "2026-08-13" },
+        "admin-search-age": { value: "" },
+        "admin-search-purpose": { value: "" },
+        "admin-search-type": { value: "all" },
+        "admin-search-status": { textContent: "" },
+        "admin-search-results": { innerHTML: "" },
+        "admin-integrated-search-button": {
+            disabled: false,
+            setAttribute(name, value) { this[name] = value; }
+        }
+    }));
+    const context = runScript("js/admin-operations.js", {
+        document: { getElementById(id) { return elements.get(id) || null; } },
+        visitLogsRef: createFirebasePageRef([{
+            _key: "visit-match",
+            date: "2026-08-02",
+            createdAt: new Date(2026, 7, 2, 10, 0).getTime(),
+            time: "10:00",
+            name: "김민수",
+            age: "성인(40세 이상)",
+            purposes: ["독서"]
+        }], { onRead(state) { visitReadFields.push(state.field); } }),
+        arLogsRef: createFirebasePageRef([{
+            _key: "ar-match",
+            date: "2026-08-03",
+            timeSlot: "11:00",
+            users: {
+                first: { name: "대표자", age: "성인(40세 이상)" },
+                second: { name: "김 민수", age: "성인(40세 이상)" }
+            }
+        }, {
+            _key: "ar-other",
+            date: "2026-08-04",
+            timeSlot: "12:00",
+            users: [{ name: "박민수", age: "성인(40세 이상)" }]
+        }]),
+        isAdminUser: true,
+        auth: { currentUser: null },
+        toArray(value) {
+            if (Array.isArray(value)) return value;
+            if (value && typeof value === "object") return Object.values(value);
+            return [];
+        },
+        isValidDateKey(value) { return /^\d{4}-\d{2}-\d{2}$/.test(value); },
+        escapeHtml(value) { return String(value); },
+        logError() {},
+        showMessage() {}
+    });
+
+    assert.equal(context.normalizeAdminNameSearchValue(" 김  민수 "), "김민수");
+    assert.equal(await context.runAdminIntegratedSearch(), true);
+    assert.equal(elements.get("admin-search-status").textContent, "2건을 찾았습니다.");
+    assert.match(elements.get("admin-search-results").innerHTML, /visit-match/);
+    assert.match(elements.get("admin-search-results").innerHTML, /ar-match/);
+    assert.match(elements.get("admin-search-results").innerHTML, /대표자, 김 민수/);
+    assert.doesNotMatch(elements.get("admin-search-results").innerHTML, /ar-other/);
+    assert.equal(elements.get("admin-integrated-search-button").disabled, false);
+    assert.equal(elements.get("admin-integrated-search-button")["aria-busy"], "false");
+    assert.deepEqual(visitReadFields, [null]);
+});
+
+test("admin integrated search uses a real form and unique button ids", () => {
+    const html = fs.readFileSync(path.join(projectRoot, "index.html"), "utf8");
+    assert.match(html, /<form id="admin-integrated-search-form"[^>]*onsubmit=/);
+    assert.match(html, /id="admin-integrated-search-button" type="submit" form="admin-integrated-search-form"/);
+    assert.equal((html.match(/id="admin-period-search-button"/g) || []).length, 1);
+    assert.equal((html.match(/id="admin-integrated-search-button"/g) || []).length, 1);
+});
 
 function parseCsvRows(content) {
     const rows = [];

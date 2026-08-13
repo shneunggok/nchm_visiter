@@ -1,4 +1,3 @@
-const ADMIN_SEARCH_PAGE_SIZE = 400;
 const ADMIN_TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const ADMIN_BACKUP_NODES = [
     "visitLogs", "arLogs", "arSlotLocks", "tvSettings", "tvContent",
@@ -32,7 +31,10 @@ function adminAuditEntry(action, type, key, before, after) {
 
 function adminRecordLabel(type, record) {
     if (type === "visit") return record?.name || "이름 없음";
-    return toArray(record?.users)[0]?.name || "예약자 없음";
+    const names = toArray(record?.users)
+        .map((user) => String(user?.name || "").trim())
+        .filter(Boolean);
+    return names.length ? names.join(", ") : "예약자 없음";
 }
 
 function adminRecordSummary(type, record) {
@@ -42,31 +44,41 @@ function adminRecordSummary(type, record) {
     return `${record.date || "-"} ${record.timeSlot || "-"} · ${toArray(record.users).length}명 · ${record.status || "예약"}`;
 }
 
+function normalizeAdminNameSearchValue(value) {
+    return String(value || "")
+        .normalize("NFKC")
+        .toLocaleLowerCase("ko-KR")
+        .replace(/\s+/g, "");
+}
+
+function adminRecordUsers(type, record) {
+    return type === "visit"
+        ? [record]
+        : toArray(record?.users).filter((user) => user && typeof user === "object");
+}
+
+function adminRecordMatchesSearch(type, record, filters) {
+    const users = adminRecordUsers(type, record);
+    const matchesName = !filters.name || users.some((user) =>
+        normalizeAdminNameSearchValue(user?.name).includes(filters.name)
+    );
+    const matchesAge = !filters.age || users.some((user) => user?.age === filters.age);
+    const matchesPurpose = !filters.purpose
+        || (type === "visit" && toArray(record?.purposes).includes(filters.purpose));
+    return matchesName && matchesAge && matchesPurpose;
+}
+
 async function loadAdminRecordsForSearch(type, start, end, requestVersion) {
     const ref = type === "visit" ? visitLogsRef : arLogsRef;
     const records = [];
-    const seen = new Set();
-    let anchor = null;
-    while (requestVersion === adminSearchVersion && isAdminUser) {
-        let query = ref.orderByChild("date").startAt(start);
-        query = anchor ? query.endAt(anchor.date, anchor.key) : query.endAt(end);
-        query = query.limitToLast(ADMIN_SEARCH_PAGE_SIZE + 1);
-        const snapshot = await query.once("value");
-        if (requestVersion !== adminSearchVersion || !isAdminUser) return null;
-        let page = [];
-        snapshot.forEach((child) => page.push({ _key: child.key, ...child.val() }));
-        const hasMore = page.length > ADMIN_SEARCH_PAGE_SIZE;
-        if (anchor) page = page.filter((item) => !(item._key === anchor.key && item.date === anchor.date));
-        if (page.length > ADMIN_SEARCH_PAGE_SIZE) page = page.slice(-ADMIN_SEARCH_PAGE_SIZE);
-        page.forEach((item) => {
-            if (!seen.has(item._key)) {
-                seen.add(item._key);
-                records.push(item);
-            }
-        });
-        if (!hasMore || !page.length) break;
-        anchor = { date: page[0].date, key: page[0]._key };
-    }
+    const snapshot = await ref.once("value");
+    if (requestVersion !== adminSearchVersion || !isAdminUser) return null;
+    snapshot.forEach((child) => {
+        const value = child.val();
+        if (!value || typeof value !== "object" || !isValidDateKey(value.date)) return;
+        if (value.date < start || value.date > end) return;
+        records.push({ ...value, _key: child.key });
+    });
     return records;
 }
 
@@ -97,12 +109,17 @@ async function runAdminIntegratedSearch() {
         showMessage("검색 시작일과 종료일을 확인해 주세요.");
         return false;
     }
-    const name = document.getElementById("admin-search-name")?.value.trim().toLocaleLowerCase("ko-KR") || "";
+    const name = normalizeAdminNameSearchValue(document.getElementById("admin-search-name")?.value);
     const age = document.getElementById("admin-search-age")?.value || "";
     const purpose = document.getElementById("admin-search-purpose")?.value || "";
     const selectedType = document.getElementById("admin-search-type")?.value || "all";
     const types = selectedType === "all" ? ["visit", "ar"] : [selectedType];
     const requestVersion = ++adminSearchVersion;
+    const searchButton = document.getElementById("admin-integrated-search-button");
+    if (searchButton) {
+        searchButton.disabled = true;
+        searchButton.setAttribute("aria-busy", "true");
+    }
     if (status) status.textContent = "선택 기간 전체 기록을 검색하는 중입니다…";
     try {
         const loaded = await Promise.all(types.map(async (type) => ({
@@ -111,13 +128,7 @@ async function runAdminIntegratedSearch() {
         })));
         if (requestVersion !== adminSearchVersion) return false;
         const results = loaded.flatMap(({ type, records }) => (records || []).map((record) => ({ type, record })))
-            .filter(({ type, record }) => {
-                const users = type === "visit" ? [record] : toArray(record.users);
-                const matchesName = !name || users.some((user) => String(user?.name || "").toLocaleLowerCase("ko-KR").includes(name));
-                const matchesAge = !age || users.some((user) => user?.age === age);
-                const matchesPurpose = !purpose || (type === "visit" && toArray(record.purposes).includes(purpose));
-                return matchesName && matchesAge && matchesPurpose;
-            })
+            .filter(({ type, record }) => adminRecordMatchesSearch(type, record, { name, age, purpose }))
             .sort((a, b) => `${b.record.date || ""} ${b.record.timeSlot || b.record.time || ""}`.localeCompare(`${a.record.date || ""} ${a.record.timeSlot || a.record.time || ""}`));
         renderAdminSearchResults(results);
         return true;
@@ -125,6 +136,11 @@ async function runAdminIntegratedSearch() {
         logError("admin-search", error);
         if (status) status.textContent = "검색하지 못했습니다. 네트워크 연결 후 다시 시도해 주세요.";
         return false;
+    } finally {
+        if (requestVersion === adminSearchVersion && searchButton) {
+            searchButton.disabled = false;
+            searchButton.setAttribute("aria-busy", "false");
+        }
     }
 }
 

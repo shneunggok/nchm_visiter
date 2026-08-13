@@ -200,7 +200,7 @@
                             <span class="text-slate-300">~</span>
                             <input type="date" id="end-date" class="text-xs font-medium outline-none bg-transparent">
                         </div>
-                        <button id="admin-search-button" onclick="reloadAdminPages()" class="search-confirm-btn ml-2">
+                        <button id="admin-period-search-button" onclick="reloadAdminPages()" class="search-confirm-btn ml-2">
                             <i data-lucide="search" class="w-4 h-4"></i> 조회
                         </button>
                     </div>
@@ -369,15 +369,15 @@
                 </section>
 
                 <section id="admin-record-management" class="admin-tool-card admin-tool-card--primary">
-                    <div class="admin-tool-heading"><div><span class="admin-tool-kicker">RECORD FINDER</span><h2>방문·예약 통합검색</h2><p>선택 기간 전체에서 이름, 날짜, 연령, 이용 목적을 함께 검색합니다.</p></div><div class="admin-backup-actions"><button type="button" class="admin-secondary-button" onclick="openAdminRecordModal('visit')">방문 수동 등록</button><button type="button" class="admin-secondary-button" onclick="openAdminRecordModal('ar')">AR 수동 등록</button><button type="button" class="admin-primary-button" onclick="runAdminIntegratedSearch()">검색</button></div></div>
-                    <div class="admin-tool-form admin-tool-form--search">
+                    <div class="admin-tool-heading"><div><span class="admin-tool-kicker">RECORD FINDER</span><h2>방문·예약 통합검색</h2><p>선택 기간 전체에서 이름, 날짜, 연령, 이용 목적을 함께 검색합니다.</p></div><div class="admin-backup-actions"><button type="button" class="admin-secondary-button" onclick="openAdminRecordModal('visit')">방문 수동 등록</button><button type="button" class="admin-secondary-button" onclick="openAdminRecordModal('ar')">AR 수동 등록</button><button id="admin-integrated-search-button" type="submit" form="admin-integrated-search-form" class="admin-primary-button">검색</button></div></div>
+                    <form id="admin-integrated-search-form" class="admin-tool-form admin-tool-form--search" onsubmit="event.preventDefault(); runAdminIntegratedSearch()">
                         <label><span>이름</span><input id="admin-search-name" type="search" maxlength="20" placeholder="이름 일부 입력"></label>
                         <label><span>시작일</span><input id="admin-search-start" type="date"></label>
                         <label><span>종료일</span><input id="admin-search-end" type="date"></label>
                         <label><span>연령</span><select id="admin-search-age"><option value="">전체 연령</option></select></label>
                         <label><span>목적</span><select id="admin-search-purpose"><option value="">전체 목적</option></select></label>
                         <label><span>기록 종류</span><select id="admin-search-type"><option value="all">방문 + AR</option><option value="visit">방문</option><option value="ar">AR 예약</option></select></label>
-                    </div>
+                    </form>
                     <div id="admin-search-status" class="admin-inline-status" role="status">검색 조건을 입력한 뒤 검색을 눌러주세요.</div>
                     <div id="admin-search-results" class="admin-record-cards"></div>
                 </section>

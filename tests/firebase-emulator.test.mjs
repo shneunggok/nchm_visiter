@@ -426,6 +426,8 @@ test("two users cannot reserve the same AR slot through the real flow", async ()
         limitToLast(50)
     )));
     assert.equal(boundedLocks.size, 1);
+    assert.equal((await assertSucceeds(get(ref(adminDb(), "arSlotLocks")))).size, 1);
+    assert.equal((await assertSucceeds(get(ref(claimedAdminDb(), "arSlotLocks")))).size, 1);
     await assertFails(get(ref(firstDb, "arSlotLocks")));
 });
 

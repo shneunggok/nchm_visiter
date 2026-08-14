@@ -538,7 +538,14 @@ async function exportAdminBackup() {
     if (!isAdminUser) return false;
     showMessage("전체 운영 데이터를 백업하는 중입니다.", "info");
     try {
-        const snapshots = await Promise.all(ADMIN_BACKUP_NODES.map((node) => db.ref(node).once("value")));
+        const snapshots = await Promise.all(ADMIN_BACKUP_NODES.map(async (node) => {
+            try {
+                return await db.ref(node).once("value");
+            } catch (error) {
+                error.backupNode = node;
+                throw error;
+            }
+        }));
         const data = { schemaVersion: 1, exportedAt: new Date().toISOString(), project: "nchm-visiter", data: {} };
         ADMIN_BACKUP_NODES.forEach((node, index) => { data.data[node] = snapshots[index].val(); });
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
@@ -546,13 +553,30 @@ async function exportAdminBackup() {
         const url = URL.createObjectURL(blob);
         link.href = url;
         link.download = `nchm-backup-${formatLocalDate()}.json`;
+        link.hidden = true;
+        document.body.appendChild(link);
         link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 0);
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
         showMessage("백업 파일을 다운로드했습니다.", "success");
         return true;
     } catch (error) {
         logError("admin-backup", error);
-        showMessage("백업 파일을 만들지 못했습니다.");
+        const nodeLabel = {
+            visitLogs: "방문 기록",
+            arLogs: "AR 예약 기록",
+            arSlotLocks: "AR 예약 시간",
+            tvSettings: "TV 설정",
+            tvContent: "TV 공지·이벤트",
+            arOperations: "AR 운영일",
+            specialDaySettings: "특별 운영일",
+            adminSettings: "관리자 설정",
+            adminTrash: "휴지통",
+            adminAudit: "변경 이력"
+        }[error?.backupNode];
+        showMessage(nodeLabel
+            ? `${nodeLabel} 자료를 읽지 못해 백업을 만들 수 없습니다. 관리자 권한과 Firebase 규칙을 확인해 주세요.`
+            : "백업 파일을 만들지 못했습니다.");
         return false;
     }
 }

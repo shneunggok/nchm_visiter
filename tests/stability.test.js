@@ -1623,6 +1623,86 @@ test("admin integrated search uses a real form and unique button ids", () => {
     assert.equal((html.match(/id="admin-integrated-search-button"/g) || []).length, 1);
 });
 
+test("admin backup reads every configured node and triggers a stable JSON download", async () => {
+    const reads = [];
+    const messages = [];
+    const links = [];
+    const revokedUrls = [];
+    let appendedLink = null;
+    class BackupBlob {
+        constructor(parts, options) {
+            this.parts = parts;
+            this.type = options.type;
+        }
+    }
+    const context = runScript("js/admin-operations.js", {
+        isAdminUser: true,
+        auth: { currentUser: { uid: "admin", email: "admin@nchm.local" } },
+        db: {
+            ref(node) {
+                return {
+                    once() {
+                        reads.push(node);
+                        return Promise.resolve({ val: () => ({ node }) });
+                    }
+                };
+            }
+        },
+        document: {
+            body: {
+                appendChild(link) {
+                    appendedLink = link;
+                    links.push(link);
+                }
+            },
+            createElement(tag) {
+                assert.equal(tag, "a");
+                return {
+                    clickCount: 0,
+                    removed: false,
+                    click() { this.clickCount += 1; },
+                    remove() { this.removed = true; }
+                };
+            },
+            getElementById() { return null; }
+        },
+        Blob: BackupBlob,
+        URL: {
+            createObjectURL(blob) {
+                assert.equal(blob.type, "application/json;charset=utf-8");
+                return "blob:nchm-backup";
+            },
+            revokeObjectURL(url) { revokedUrls.push(url); }
+        },
+        formatLocalDate() { return "2026-08-14"; },
+        showMessage(message, type) { messages.push({ message, type }); },
+        logError() {},
+        setTimeout(callback) { callback(); }
+    });
+
+    assert.equal(await context.exportAdminBackup(), true);
+    assert.deepEqual(reads, [
+        "visitLogs",
+        "arLogs",
+        "arSlotLocks",
+        "tvSettings",
+        "tvContent",
+        "arOperations",
+        "specialDaySettings",
+        "adminSettings",
+        "adminTrash",
+        "adminAudit",
+    ]);
+    assert.equal(links.length, 1);
+    assert.equal(appendedLink.href, "blob:nchm-backup");
+    assert.equal(appendedLink.download, "nchm-backup-2026-08-14.json");
+    assert.equal(appendedLink.hidden, true);
+    assert.equal(appendedLink.clickCount, 1);
+    assert.equal(appendedLink.removed, true);
+    assert.deepEqual(revokedUrls, ["blob:nchm-backup"]);
+    assert.deepEqual(messages.at(-1), { message: "백업 파일을 다운로드했습니다.", type: "success" });
+});
+
 function parseCsvRows(content) {
     const rows = [];
     let row = [];
